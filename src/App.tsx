@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import * as gs from './services/googleSheets';
 
-const LOGO_URL = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgdmlld0JveD0iMCAwIDEwMCAxMDAiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHJlY3Qgd2lkdGg9IjEwMCIgaGVpZ2h0PSIxMDAiIHJ4PSIyMCIgZmlsbD0iI0VGNDQ0NCIvPjx0ZXh0IHg9IjUwIiB5PSI2NSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0id2hpdGUiIGZvbnQtc2l6ZT0iNDAiIGZvbnQtd2VpZ2h0PSJib2xkIj7QnNC7PC90ZXh0Pjwvc3ZnPg==';
+const LOGO_URL = '/logo.svg';
 
 // ============ ХУК useData ============
 function useData() {
