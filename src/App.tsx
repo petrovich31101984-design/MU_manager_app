@@ -706,3 +706,540 @@ function ArrivalCardModal({
               >
                 🧰 Оборудование
               </button>
+            </div>
+          </div>
+
+          {/* Поиск и список номенклатуры */}
+          <div className="bg-slate-50 rounded-lg p-4 border border-slate-200">
+            <h4 className="text-sm font-semibold text-slate-700 mb-3">Доступные позиции</h4>
+            <input
+              type="text"
+              placeholder="Поиск по наименованию..."
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              className="w-full px-3 py-2 mb-3 bg-white border border-slate-300 rounded-lg text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+            />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-48 overflow-y-auto">
+              {filteredNomenclature.map(item => (
+                <button
+                  key={item.id}
+                  onClick={() => addItem(item)}
+                  className="flex items-center justify-between p-3 bg-white rounded-lg border border-slate-200 hover:border-blue-400 hover:bg-blue-50 transition-colors text-left"
+                >
+                  <div className="flex-1">
+                    <div className="text-sm font-medium text-slate-800">{item.name}</div>
+                    <div className="text-xs text-slate-500">{item.currentPrice.toLocaleString('ru-RU')} ₽ / {item.unit}</div>
+                  </div>
+                  <span className="text-blue-600 text-lg">+</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Выбранные позиции */}
+          {form.items.length > 0 && (
+            <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
+              <div className="p-4 bg-slate-50 border-b border-slate-200">
+                <h4 className="text-sm font-semibold text-slate-700">Выбранные позиции</h4>
+              </div>
+              <table className="w-full table-fixed">
+                <colgroup>
+                  <col style={{ width: '50%' }} />
+                  <col style={{ width: '120px' }} />
+                  <col style={{ width: '150px' }} />
+                  <col style={{ width: '150px' }} />
+                </colgroup>
+                <thead>
+                  <tr className="border-b border-slate-200 bg-slate-50">
+                    <th className="px-4 py-2 text-left text-xs font-medium text-slate-600 uppercase">Наименование</th>
+                    <th className="px-4 py-2 text-center text-xs font-medium text-slate-600 uppercase">Кол-во</th>
+                    <th className="px-4 py-2 text-right text-xs font-medium text-slate-600 uppercase">Цена за ед.</th>
+                    <th className="px-4 py-2 text-right text-xs font-medium text-slate-600 uppercase">Сумма</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {form.items.map((item: ArrivalItem) => {
+                    const nom = nomenclature.find(n => n.id === item.nomenclatureId);
+                    return (
+                      <tr key={item.nomenclatureId} className="border-b border-slate-100">
+                        <td className="px-4 py-3 text-sm text-slate-800 truncate">{nom?.name}</td>
+                        <td className="px-4 py-3 text-center">
+                          <input
+                            type="number"
+                            value={item.quantity}
+                            onChange={e => updateQuantity(item.nomenclatureId, parseInt(e.target.value) || 0)}
+                            min="0"
+                            className="w-full px-2 py-1 text-center border border-slate-300 rounded text-slate-800 focus:outline-none focus:border-blue-500"
+                          />
+                        </td>
+                        <td className="px-4 py-3 text-right text-sm text-slate-700">{item.price.toLocaleString('ru-RU')} ₽</td>
+                        <td className="px-4 py-3 text-right text-sm font-semibold text-emerald-600">{item.total.toLocaleString('ru-RU')} ₽</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+                <tfoot>
+                  <tr className="bg-slate-50 font-bold">
+                    <td colSpan={3} className="px-4 py-3 text-right text-sm text-slate-800">ИТОГО:</td>
+                    <td className="px-4 py-3 text-right text-lg text-emerald-600">{totalAmount.toLocaleString('ru-RU')} ₽</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
+        </div>
+
+        <div className="p-6 border-t border-slate-200 flex justify-end gap-3">
+          <button onClick={onClose} className="px-4 py-2 rounded-lg text-slate-600 hover:bg-slate-100">Отмена</button>
+          <button 
+            onClick={handleSubmit} 
+            disabled={form.items.length === 0}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-300 rounded-lg text-white font-medium"
+          >
+            💾 Сохранить карту прихода
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============ КОМПОНЕНТ ОТОБРАЖЕНИЯ ОБЪЯВЛЕНИЙ ============
+function AnnouncementsPanel({ announcements }: { announcements: gs.Announcement[] }) {
+  const activeAnnouncements = announcements.filter(a => a.active);
+  
+  if (activeAnnouncements.length === 0) return null;
+
+  return (
+    <div className="bg-yellow-50 border-2 border-yellow-300 rounded-lg p-4 mb-4">
+      <h3 className="text-lg font-bold text-yellow-800 mb-3 flex items-center gap-2">
+        📢 Объявления
+      </h3>
+      <div className="space-y-3">
+        {activeAnnouncements.map(announcement => (
+          <div key={announcement.id} className="bg-white rounded-lg p-4 border border-yellow-200">
+            <div className="flex justify-between items-start mb-2">
+              <h4 className="font-semibold text-slate-800">{announcement.title}</h4>
+              <span className="text-xs text-slate-500">
+                {new Date(announcement.date).toLocaleDateString('ru-RU')}
+              </span>
+            </div>
+            <p className="text-sm text-slate-700 whitespace-pre-wrap">{announcement.text}</p>
+            <div className="mt-2 text-xs text-slate-500">
+              От: {announcement.createdBy}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ============ МОДАЛЬНОЕ ОКНО СОЗДАНИЯ ОБЪЯВЛЕНИЯ ============
+function CreateAnnouncementModal({
+  onClose,
+  onCreate
+}: {
+  onClose: () => void;
+  onCreate: (announcement: { title: string; text: string; recipients: string[] }) => void;
+}) {
+  const [title, setTitle] = useState('');
+  const [text, setText] = useState('');
+  const [recipients, setRecipients] = useState<string[]>(['employees', 'warehouse']);
+
+  const handleSubmit = () => {
+    if (!title.trim() || !text.trim()) {
+      alert('Заполните заголовок и текст объявления');
+      return;
+    }
+    onCreate({ title, text, recipients });
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl border border-slate-200 w-full max-w-2xl shadow-2xl">
+        <div className="p-6 border-b border-slate-200">
+          <h3 className="text-lg font-bold text-slate-800">📢 Создать объявление</h3>
+        </div>
+        <div className="p-6 space-y-4">
+          <div>
+            <label className="text-sm text-slate-600 mb-1 block">Заголовок *</label>
+            <input
+              type="text"
+              value={title}
+              onChange={e => setTitle(e.target.value)}
+              placeholder="Введите заголовок объявления"
+              className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+            />
+          </div>
+          <div>
+            <label className="text-sm text-slate-600 mb-1 block">Текст объявления *</label>
+            <textarea
+              value={text}
+              onChange={e => setText(e.target.value)}
+              placeholder="Введите текст объявления"
+              rows={6}
+              className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 resize-none"
+            />
+          </div>
+          <div>
+            <label className="text-sm text-slate-600 mb-2 block">Получатели</label>
+            <div className="space-y-2">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={recipients.includes('employees')}
+                  onChange={e => {
+                    if (e.target.checked) {
+                      setRecipients([...recipients, 'employees']);
+                    } else {
+                      setRecipients(recipients.filter(r => r !== 'employees'));
+                    }
+                  }}
+                  className="w-4 h-4 text-blue-600 border-slate-300 rounded focus:ring-blue-500"
+                />
+                <span className="text-sm text-slate-700">Сотрудники</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={recipients.includes('warehouse')}
+                  onChange={e => {
+                    if (e.target.checked) {
+                      setRecipients([...recipients, 'warehouse']);
+                    } else {
+                      setRecipients(recipients.filter(r => r !== 'warehouse'));
+                    }
+                  }}
+                  className="w-4 h-4 text-blue-600 border-slate-300 rounded focus:ring-blue-500"
+                />
+                <span className="text-sm text-slate-700">Кладовщик</span>
+              </label>
+            </div>
+          </div>
+        </div>
+        <div className="p-6 border-t border-slate-200 flex justify-end gap-3">
+          <button onClick={onClose} className="px-4 py-2 rounded-lg text-slate-600 hover:bg-slate-100">Отмена</button>
+          <button
+            onClick={handleSubmit}
+            disabled={!title.trim() || !text.trim()}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-300 rounded-lg text-white font-medium"
+          >
+            📢 Опубликовать
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============ КОМПОНЕНТ ЛИСТА РАСХОДА ============
+function ExpenseSheetView({
+  sheet,
+  employees,
+  onArchive,
+  onEdit,
+  onRestore,
+  isArchived = false
+}: {
+  sheet: gs.ExpenseSheet;
+  employees: gs.Employee[];
+  onArchive: (id: string) => void;
+  onEdit: (sheet: gs.ExpenseSheet) => void;
+  onRestore?: (id: string) => void;
+  isArchived?: boolean;
+}) {
+  const emp = employees.find(e => e.id === sheet.employeeId);
+  const limit = sheet.therapyCost > 0 ? (sheet.totalAmount * 100) / sheet.therapyCost : 0;
+  const limitAmount = sheet.therapyCost * 0.05;
+  const isExceeded = limit > 5;
+  const isLow = limit < 2.5;
+
+  const formatDateShort = (dateStr: string) => {
+    const date = new Date(dateStr);
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = String(date.getFullYear()).slice(-2);
+    return `${day}.${month}.${year}`;
+  };
+
+  // Функция для форматирования ФИО в "Фамилия И.О."
+  const formatFullName = (fullName: string) => {
+    if (!fullName) return '';
+    const parts = fullName.trim().split(' ');
+    if (parts.length === 0) return '';
+    if (parts.length === 1) return parts[0];
+    
+    const lastName = parts[0]; // Фамилия полностью
+    const initials = parts.slice(1).map(part => part[0] + '.').join(''); // И.О.
+    return `${lastName} ${initials}`;
+  };
+
+  const employeeFormatted = formatFullName(emp?.fullName || sheet.employeeName);
+  const patientFormatted = formatFullName(sheet.patientName);
+
+  const handleExportToExcel = () => {
+    // Создаём CSV только с нужными полями
+    let csv = 'Лист расхода\n\n';
+    csv += `Дата составления:,${formatDateShort(sheet.date)}\n`;
+    csv += `Сотрудник:,${employeeFormatted}\n`;
+    csv += `Пациент:,${patientFormatted}\n`;
+    csv += `Дата рождения:,${sheet.patientBirthDate ? formatDateShort(sheet.patientBirthDate) : '-'}\n\n`;
+    
+    csv += 'Препараты и расходники\n';
+    csv += 'Название,Тип,Количество,Цена за единицу,Сумма\n';
+    
+    // Сортируем: ЛС ПКУ всегда первые
+    const sortedItems = [...sheet.items].sort((a, b) => {
+      if (a.category === 'ЛС ПКУ' && b.category !== 'ЛС ПКУ') return -1;
+      if (a.category !== 'ЛС ПКУ' && b.category === 'ЛС ПКУ') return 1;
+      return 0;
+    });
+    
+    sortedItems.forEach(item => {
+      csv += `${item.name},${item.category},${item.quantity},${item.pricePerUnit},${item.total}\n`;
+    });
+    
+    csv += `\nИТОГО,,,,${sheet.totalAmount}\n`;
+
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `Лист_расхода_${patientFormatted}_${formatDateShort(sheet.date)}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <div className="bg-white border border-slate-300 rounded-lg shadow-sm overflow-hidden">
+      {/* Шапка - светло-серый цвет */}
+      <div className="bg-slate-100 px-6 py-4 border-b border-slate-300">
+        <div className="flex justify-between items-start mb-4">
+          <h2 className="text-xl font-bold text-slate-800">Лист расхода</h2>
+        <div className="flex gap-2">
+          {isArchived && onRestore && (
+            <button 
+              onClick={() => onRestore(sheet.id)}
+              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm rounded transition-colors min-w-[120px]"
+              title="Восстановить из архива"
+            >
+              ♻️ Восстановить
+            </button>
+          )}
+          <button 
+            onClick={() => onEdit(sheet)}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded transition-colors min-w-[120px]"
+            title="Редактировать"
+          >
+            ✍️ Редактировать
+          </button>
+          {!isArchived && (
+            <button 
+              onClick={() => onArchive(sheet.id)}
+              className="px-4 py-2 bg-slate-500 hover:bg-slate-600 text-white text-sm rounded transition-colors min-w-[120px]"
+              title="Отправить в архив"
+            >
+              📦 В архив
+            </button>
+          )}
+          <button 
+            onClick={handleExportToExcel}
+            className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm rounded transition-colors min-w-[120px]"
+            title="Импорт в Excel"
+          >
+            📊 Импорт в Excel
+          </button>
+        </div>        </div>
+        
+        {/* Информация в шапке */}
+        <div className="space-y-2 text-sm">
+          <div className="flex flex-wrap gap-x-6 gap-y-1">
+            <div>
+              <span className="text-slate-600">Дата составления:</span>{' '}
+              <span className="font-semibold">{formatDateShort(sheet.date)}</span>
+            </div>
+            <div>
+              <span className="text-slate-600">Сотрудник:</span>{' '}
+              <span className="font-semibold">{employeeFormatted}</span>
+            </div>
+            <div>
+              <span className="text-slate-600">Пациент:</span>{' '}
+              <span className="font-semibold">{patientFormatted}</span>
+            </div>
+            <div>
+              <span className="text-slate-600">Дата рождения:</span>{' '}
+              <span className="font-semibold">{sheet.patientBirthDate ? formatDateShort(sheet.patientBirthDate) : '-'}</span>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-x-2 gap-y-2">
+            <div>
+              <span className="text-slate-600">Категория выезда:</span>{' '}
+              <span className="font-semibold">{sheet.callCategory}</span>
+            </div>
+            <div>
+              <span className="text-slate-600">Название терапии:</span>{' '}
+              <span className="font-semibold">{sheet.therapyName || '-'}</span>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-x-6 gap-y-2">
+            <div>
+              <span className="text-slate-600">Стоимость терапии:</span>{' '}
+              <span className="font-semibold">
+                {sheet.therapyCost.toLocaleString('ru-RU')} ₽
+                {sheet.therapyCost > 0 && (
+                  <span className="text-slate-500 ml-2">(лимит: {limitAmount.toLocaleString('ru-RU')} ₽)</span>
+                )}
+              </span>
+            </div>
+            <div>
+              <span className="text-slate-600">Итого по препаратам:</span>{' '}
+              <span className="font-semibold">{sheet.totalAmount.toLocaleString('ru-RU')} ₽</span>
+            </div>
+          </div>
+
+          {/* Использование лимита */}
+          {sheet.therapyCost > 0 && (
+            <div className="mt-4">
+              <div className="flex justify-between items-center mb-1">
+                <span className="text-sm text-slate-700">Использование лимита</span>
+                <span className={`text-sm ${isExceeded ? 'text-red-600' : isLow ? 'text-slate-500' : 'text-emerald-600'}`}>
+                  {limit.toFixed(2)}%
+                </span>
+              </div>
+              <div className="w-full bg-slate-200 rounded-full h-1.5 overflow-hidden">
+                <div 
+                  className={`h-full rounded-full transition-all ${
+                    isExceeded ? 'bg-red-500' : isLow ? 'bg-slate-400' : 'bg-emerald-500'
+                  }`}
+                  style={{ width: `${Math.min(limit, 100)}%` }}
+                ></div>
+              </div>
+              {isExceeded && <div className="text-xs text-red-600 mt-1">⚠️ Превышение лимита 5%</div>}
+              {isLow && <div className="text-xs text-slate-500 mt-1">ℹ️ Лимит ниже 2.5%</div>}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Тело - белый цвет */}
+      <div className="bg-white p-6">
+        {/* Препараты и расходники */}
+        <div className="mb-2">
+          <h3 className="text-base font-semibold text-slate-800">Препараты и расходники</h3>
+        </div>
+        <div className="overflow-y-auto" style={{ maxHeight: '400px' }}>
+          <table className="w-full border-collapse">
+            <colgroup>
+              <col style={{ width: '40%' }} />
+              <col style={{ width: '15%' }} />
+              <col style={{ width: '15%' }} />
+              <col style={{ width: '15%' }} />
+              <col style={{ width: '15%' }} />
+            </colgroup>
+            <thead>
+              <tr className="bg-slate-100">
+                <th className="px-3 py-2 text-left text-sm font-semibold text-slate-700 border border-slate-300">Название</th>
+                <th className="px-3 py-2 text-left text-sm font-semibold text-slate-700 border border-slate-300">Тип</th>
+                <th className="px-3 py-2 text-center text-sm font-semibold text-slate-700 border border-slate-300">Количество</th>
+                <th className="px-3 py-2 text-right text-sm font-semibold text-slate-700 border border-slate-300">Цена за единицу</th>
+                <th className="px-3 py-2 text-right text-sm font-semibold text-slate-700 border border-slate-300">Сумма</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sheet.items.length > 0 ? (
+                [...sheet.items]
+                  .sort((a, b) => {
+                    // ЛС ПКУ всегда первые
+                    if (a.category === 'ЛС ПКУ' && b.category !== 'ЛС ПКУ') return -1;
+                    if (a.category !== 'ЛС ПКУ' && b.category === 'ЛС ПКУ') return 1;
+                    return 0;
+                  })
+                  .map(item => (
+                    <tr key={item.nomenclatureId} className="border-b border-slate-200">
+                      <td className="px-3 py-2 text-sm text-slate-800 border border-slate-300">{item.name}</td>
+                      <td className="px-3 py-2 text-sm text-slate-700 border border-slate-300">{item.category}</td>
+                      <td className="px-3 py-2 text-center text-sm text-slate-800 border border-slate-300">{item.quantity}</td>
+                      <td className="px-3 py-2 text-right text-sm text-slate-700 border border-slate-300">{item.pricePerUnit.toLocaleString('ru-RU')} ₽</td>
+                      <td className="px-3 py-2 text-right text-sm font-semibold text-slate-800 border border-slate-300">{item.total.toLocaleString('ru-RU')} ₽</td>
+                    </tr>
+                  ))
+              ) : (
+                <tr>
+                  <td colSpan={5} className="px-3 py-4 text-center text-sm text-slate-400 border border-slate-300">Нет данных</td>
+                </tr>
+              )}
+            </tbody>
+            <tfoot>
+              <tr className="border-t-2 border-slate-300 bg-slate-50">
+                <td className="px-3 py-2 text-left text-sm font-semibold text-slate-800 border border-slate-300">ИТОГО</td>
+                <td colSpan={3} className="border border-slate-300"></td>
+                <td className="px-3 py-2 text-right text-sm font-semibold text-blue-600 border border-slate-300">{sheet.totalAmount.toLocaleString('ru-RU')} ₽</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============ РАСХОД У СОТРУДНИКА ============
+// ============ АРХИВ ============
+function ArchivePage({ data }: {  ReturnType<typeof useData> }) {
+  const { employees, expenseSheets, setExpenseSheets, arrivals, setArrivals } = data;
+  const [filterType, setFilterType] = useState<'month' | 'quarter' | 'halfyear' | 'year' | 'all'>('month');
+  const [selectedMonth, setSelectedMonth] = useState(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  });
+  const [showArchiveList, setShowArchiveList] = useState(false);
+  const [showFiredEmployees, setShowFiredEmployees] = useState(false);
+  const [showArrivalsArchive, setShowArrivalsArchive] = useState(false);
+  
+  // Получение уволенных сотрудников
+  const firedEmployees = employees.filter(e => e.status === 'Уволен');
+
+  // Функция для определения периода
+  const getPeriodMonths = () => {
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth(); // 0-11
+
+    switch (filterType) {
+      case 'month':
+        return [selectedMonth];
+      case 'quarter': {
+        const quarterStart = Math.floor(currentMonth / 3) * 3;
+        const months = [];
+        for (let i = 0; i < 3; i++) {
+          const month = quarterStart + i;
+          months.push(`${currentYear}-${String(month + 1).padStart(2, '0')}`);
+        }
+        return months;
+      }
+      case 'halfyear': {
+        const halfyearStart = Math.floor(currentMonth / 6) * 6;
+        const months = [];
+        for (let i = 0; i < 6; i++) {
+          const month = halfyearStart + i;
+          months.push(`${currentYear}-${String(month + 1).padStart(2, '0')}`);
+        }
+        return months;
+      }
+      case 'year': {
+        const months = [];
+        for (let i = 0; i < 12; i++) {
+          months.push(`${currentYear}-${String(i + 1).padStart(2, '0')}`);
+        }
+        return months;
+      }
+      case 'all':
+        return []; // Пустой массив означает все месяцы
+      default:
+        return [selectedMonth];
+    }
+  };
+              >
+                🧰 Оборудование
+              </button>
