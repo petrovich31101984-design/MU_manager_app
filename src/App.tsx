@@ -9,10 +9,6 @@ function useData() {
 }
 
 // Placeholder components - will be defined later
-function EditExpenseSheetModal(props: any) {
-  return null;
-}
-
 function AddNomenclatureModal(props: any) {
   return null;
 }
@@ -2399,6 +2395,494 @@ function ViewNomenclatureCardModal({
           </div>
         </div>
       );
+}
+
+// ============ ПРИХОД К СОТРУДНИКУ ============
+function ArrivalPage({ data }: { data: ReturnType<typeof useData> }) {
+  const { employees, nomenclature, arrivals, setArrivals, refresh } = data;
+  const [showAddArrival, setShowAddArrival] = useState(false);
+  const [editingArrival, setEditingArrival] = useState<gs.Arrival | null>(null);
+  const [viewingArrival, setViewingArrival] = useState<gs.Arrival | null>(null);
+  const now = new Date();
+  const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const [selectedMonth, setSelectedMonth] = useState(currentMonth);
+
+  const handleAddArrival = async (form: any) => {
+    setShowAddArrival(false);
+    const newArrival = {
+      id: `ARR-${Date.now()}`,
+      ...form,
+      date: form.date,
+      month: selectedMonth,
+      addedBy: 'Руководитель',
+      employeeName: form.employeeName || '',
+    };
+    setArrivals([...arrivals, newArrival]);
+    gs.addArrival(newArrival).catch(err => {
+      console.error('Ошибка добавления прихода:', err);
+      alert('Ошибка при добавлении прихода. Попробуйте ещё раз.');
+    });
+  };
+
+  const generateMonthOptions = () => {
+    const months = [];
+    const current = new Date();
+    for (let i = 0; i < 12; i++) {
+      const date = new Date(current.getFullYear(), current.getMonth() - i, 1);
+      const monthStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+      const monthName = date.toLocaleString('ru-RU', { month: 'long', year: 'numeric' });
+      months.push({ value: monthStr, label: monthName });
+    }
+    return months;
+  };
+
+  const filteredArrivals = arrivals.filter(a => a.month === selectedMonth);
+  const totalAmount = filteredArrivals.reduce((s, a) => s + a.amount, 0);
+  const selectedMonthName = new Date(selectedMonth + '-01').toLocaleString('ru-RU', { month: 'long', year: 'numeric' });
+
+  const handleEditArrival = async (form: any) => {
+    if (!editingArrival) return;
+    setEditingArrival(null);
+    
+    const updatedArrival = {
+      ...editingArrival,
+      ...form,
+      employeeName: form.employeeName || editingArrival.employeeName || '',
+    };
+    
+    setArrivals(arrivals.map(a => a.id === editingArrival.id ? updatedArrival : a));
+    gs.updateArrival(editingArrival.id, updatedArrival).catch(err => {
+      console.error('Ошибка обновления прихода:', err);
+      alert('Ошибка при обновлении прихода. Попробуйте ещё раз.');
+    });
+  };
+
+  const handleDeleteArrival = async (id: string) => {
+    if (!confirm('Удалить эту карту прихода?')) return;
+    setArrivals(arrivals.filter(a => a.id !== id));
+    gs.deleteArrival(id).catch(err => {
+      console.error('Ошибка удаления прихода:', err);
+      alert('Ошибка при удалении прихода. Попробуйте ещё раз.');
+      refresh();
+    });
+  };
+
+  const handleArchiveArrival = async (id: string) => {
+    if (!confirm('Отправить карту прихода в архив?')) return;
+    setArrivals(arrivals.map(a => a.id === id ? { ...a, archived: true } : a));
+    gs.archiveArrival(id).catch(err => {
+      console.error('Ошибка архивирования прихода:', err);
+      alert('Ошибка при архивировании прихода. Попробуйте ещё раз.');
+      refresh();
+    });
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex justify-between items-start">
+        <div>
+          <h2 className="text-2xl font-bold text-slate-800">📥 Приход к сотруднику</h2>
+          <p className="text-slate-500 text-sm mt-1">Управление поступлениями</p>
+        </div>
+        <select
+          value={selectedMonth}
+          onChange={(e) => setSelectedMonth(e.target.value)}
+          className="px-4 py-2 bg-white border border-slate-300 rounded-lg text-sm text-slate-800 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+        >
+          {generateMonthOptions().map(month => (
+            <option key={month.value} value={month.value}>
+              {month.label}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="flex justify-between items-center">
+        <div className="text-sm text-slate-600 py-2">
+          ПРИХОД ЗА {selectedMonthName.toUpperCase()}: <span className="text-emerald-600 font-bold">
+            {totalAmount.toLocaleString('ru-RU')} ₽
+          </span>
+        </div>
+        <button onClick={() => setShowAddArrival(true)} className="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg text-white text-sm font-medium shadow-sm">+ Создать карту прихода</button>
+      </div>
+
+      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+        <table className="w-full">
+          <thead>
+            <tr className="border-b border-slate-200 text-left bg-slate-50">
+              <th className="px-5 py-3 text-xs font-medium text-slate-600 uppercase">Дата</th>
+              <th className="px-5 py-3 text-xs font-medium text-slate-600 uppercase">Сотрудник</th>
+              <th className="px-5 py-3 text-xs font-medium text-slate-600 uppercase">Тип</th>
+              <th className="px-5 py-3 text-xs font-medium text-slate-600 uppercase text-right">Сумма (₽)</th>
+              <th className="px-5 py-3 text-xs font-medium text-slate-600 uppercase text-center">Действия</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filteredArrivals.sort((a, b) => b.date.localeCompare(a.date)).map(arr => {
+              return (
+                <tr key={arr.id} className="border-b border-slate-100 hover:bg-slate-50">
+                  <td className="px-5 py-3 text-sm text-slate-700">
+                    {new Date(arr.date).toLocaleDateString('ru-RU')}
+                  </td>
+                  <td 
+                    className="px-5 py-3 text-sm text-blue-600 hover:text-blue-800 cursor-pointer hover:underline"
+                    onClick={() => setViewingArrival(arr)}
+                  >
+                    {(() => {
+                      const employee = employees.find(e => e.id === arr.employeeId);
+                      return employee ? employee.fullName : (arr.employeeName || arr.employeeId);
+                    })()}
+                  </td>
+                  <td className="px-5 py-3">
+                    <span className={`px-2 py-1 rounded-full text-xs ${arr.type === 'Плановый' ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'}`}>{arr.type}</span>
+                  </td>
+                  <td className="px-5 py-3 text-right text-sm font-semibold text-emerald-600">{arr.amount.toLocaleString('ru-RU')} ₽</td>
+                  <td className="px-5 py-3">
+                    <div className="flex items-center justify-center gap-2">
+                      <button 
+                        onClick={() => setEditingArrival(arr)}
+                        className="text-blue-600 hover:text-blue-800 text-lg"
+                        title="Редактировать"
+                      >
+                        ✍️
+                      </button>
+                      <button 
+                        onClick={() => handleArchiveArrival(arr.id)}
+                        className="text-orange-600 hover:text-orange-800 text-lg"
+                        title="Отправить в архив"
+                      >
+                        📦
+                      </button>
+                      <button 
+                        onClick={() => handleDeleteArrival(arr.id)}
+                        className="text-red-600 hover:text-red-800 text-lg"
+                        title="Удалить"
+                      >
+                        ❌
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        {filteredArrivals.length === 0 && (
+          <div className="p-8 text-center text-slate-500"><p>Нет записей о приходе за {selectedMonthName}</p></div>
+        )}
+      </div>
+
+      {showAddArrival && <ArrivalCardModal 
+        employees={employees.filter(e => e.status !== 'Уволен')} 
+        nomenclature={nomenclature}
+        onClose={() => setShowAddArrival(false)} 
+        onAdd={handleAddArrival} 
+      />}
+
+      {editingArrival && <ArrivalCardModal 
+        employees={employees.filter(e => e.status !== 'Уволен')} 
+        nomenclature={nomenclature}
+        initialData={editingArrival}
+        onClose={() => setEditingArrival(null)} 
+        onAdd={handleEditArrival} 
+      />}
+
+      {viewingArrival && <ViewArrivalModal
+        arrival={viewingArrival}
+        employees={employees}
+        nomenclature={nomenclature}
+        onClose={() => setViewingArrival(null)}
+      />}
+    </div>
+  );
+}
+
+// ============ МОДАЛЬНОЕ ОКНО РЕДАКТИРОВАНИЯ ЛИСТА РАСХОДА ============
+function EditExpenseSheetModal({
+  sheet,
+  employees,
+  nomenclature,
+  onClose,
+  onSave
+}: {
+  sheet: gs.ExpenseSheet;
+  employees: gs.Employee[];
+  nomenclature: gs.Nomenclature[];
+  onClose: () => void;
+  onSave: (sheet: gs.ExpenseSheet) => void;
+}) {
+  const [formData, setFormData] = useState({
+    date: sheet.date,
+    employeeId: sheet.employeeId,
+    patientName: sheet.patientName,
+    patientBirthDate: sheet.patientBirthDate,
+    callCategory: sheet.callCategory,
+    therapyName: sheet.therapyName,
+    therapyCost: sheet.therapyCost,
+    items: [...sheet.items]
+  });
+
+  const formatDateShort = (dateStr: string) => {
+    const date = new Date(dateStr);
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = String(date.getFullYear()).slice(-2);
+    return `${day}.${month}.${year}`;
+  };
+
+  const totalAmount = formData.items.reduce((sum, item) => sum + item.total, 0);
+
+  const handleAddItem = () => {
+    setFormData({
+      ...formData,
+      items: [...formData.items, {
+        nomenclatureId: '',
+        name: '',
+        category: 'ЛС',
+        quantity: 1,
+        pricePerUnit: 0,
+        total: 0
+      }]
+    });
+  };
+
+  const handleUpdateItem = (index: number, field: string, value: any) => {
+    const newItems = [...formData.items];
+    newItems[index] = { ...newItems[index], [field]: value };
+    
+    // Пересчитываем сумму
+    if (field === 'quantity' || field === 'pricePerUnit') {
+      newItems[index].total = newItems[index].quantity * newItems[index].pricePerUnit;
+    }
+    
+    setFormData({ ...formData, items: newItems });
+  };
+
+  const handleRemoveItem = (index: number) => {
+    setFormData({
+      ...formData,
+      items: formData.items.filter((_, i) => i !== index)
+    });
+  };
+
+  const handleSubmit = () => {
+    const updatedSheet: gs.ExpenseSheet = {
+      ...sheet,
+      date: formData.date,
+      employeeId: formData.employeeId,
+      employeeName: employees.find(e => e.id === formData.employeeId)?.fullName || '',
+      patientName: formData.patientName,
+      patientBirthDate: formData.patientBirthDate,
+      callCategory: formData.callCategory,
+      therapyName: formData.therapyName,
+      therapyCost: formData.therapyCost,
+      items: formData.items,
+      totalAmount: totalAmount
+    };
+    onSave(updatedSheet);
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+        <div className="sticky top-0 bg-slate-100 px-6 py-4 flex justify-between items-center border-b border-slate-300">
+          <h2 className="text-xl font-bold text-slate-800">Редактирование листа расхода</h2>
+          <button onClick={onClose} className="text-slate-500 hover:text-slate-700 text-2xl">×</button>
+        </div>
+
+        <div className="p-6 space-y-6">
+          {/* Основная информация */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Дата составления</label>
+              <input
+                type="date"
+                value={formData.date}
+                onChange={(e) => setFormData({ ...formData, date: e.target.value })}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Сотрудник</label>
+              <select
+                value={formData.employeeId}
+                onChange={(e) => setFormData({ ...formData, employeeId: e.target.value })}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                {employees.map(emp => (
+                  <option key={emp.id} value={emp.id}>{emp.fullName}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Пациент (ФИО)</label>
+              <input
+                type="text"
+                value={formData.patientName}
+                onChange={(e) => setFormData({ ...formData, patientName: e.target.value })}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Дата рождения пациента</label>
+              <input
+                type="date"
+                value={formData.patientBirthDate}
+                onChange={(e) => setFormData({ ...formData, patientBirthDate: e.target.value })}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Категория выезда</label>
+              <select
+                value={formData.callCategory}
+                onChange={(e) => setFormData({ ...formData, callCategory: e.target.value })}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="Первичный">Первичный</option>
+                <option value="Повторный">Повторный</option>
+                <option value="Экстренный">Экстренный</option>
+                <option value="Плановый">Плановый</option>
+                <option value="Курс">Курс</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Название терапии</label>
+              <input
+                type="text"
+                value={formData.therapyName}
+                onChange={(e) => setFormData({ ...formData, therapyName: e.target.value })}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Стоимость терапии (₽)</label>
+              <input
+                type="number"
+                value={formData.therapyCost}
+                onChange={(e) => setFormData({ ...formData, therapyCost: Number(e.target.value) })}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+          </div>
+
+          {/* Препараты и расходники */}
+          <div>
+            <div className="flex justify-between items-center mb-3">
+              <h3 className="text-base font-semibold text-slate-800">Препараты и расходники</h3>
+              <button
+                onClick={handleAddItem}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded"
+              >
+                + Добавить позицию
+              </button>
+            </div>
+            
+            <table className="w-full border-collapse">
+              <colgroup>
+                <col style={{ width: '35%' }} />
+                <col style={{ width: '15%' }} />
+                <col style={{ width: '12%' }} />
+                <col style={{ width: '15%' }} />
+                <col style={{ width: '15%' }} />
+                <col style={{ width: '8%' }} />
+              </colgroup>
+              <thead>
+                <tr className="bg-slate-100">
+                  <th className="px-3 py-2 text-left text-sm font-semibold text-slate-700 border border-slate-300">Название</th>
+                  <th className="px-3 py-2 text-left text-sm font-semibold text-slate-700 border border-slate-300">Тип</th>
+                  <th className="px-3 py-2 text-center text-sm font-semibold text-slate-700 border border-slate-300">Количество</th>
+                  <th className="px-3 py-2 text-right text-sm font-semibold text-slate-700 border border-slate-300">Цена за единицу</th>
+                  <th className="px-3 py-2 text-right text-sm font-semibold text-slate-700 border border-slate-300">Сумма</th>
+                  <th className="px-3 py-2 text-center text-sm font-semibold text-slate-700 border border-slate-300">Действия</th>
+                </tr>
+              </thead>
+              <tbody>
+                {formData.items.map((item, index) => (
+                  <tr key={index} className="border-b border-slate-200">
+                    <td className="px-3 py-2 border border-slate-300">
+                      <input
+                        type="text"
+                        value={item.name}
+                        onChange={(e) => handleUpdateItem(index, 'name', e.target.value)}
+                        className="w-full px-2 py-1 border border-slate-300 rounded text-sm"
+                      />
+                    </td>
+                    <td className="px-3 py-2 border border-slate-300">
+                      <select
+                        value={item.category}
+                        onChange={(e) => handleUpdateItem(index, 'category', e.target.value)}
+                        className="w-full px-2 py-1 border border-slate-300 rounded text-sm"
+                      >
+                        <option value="ЛС ПКУ">ЛС ПКУ</option>
+                        <option value="ЛС">ЛС</option>
+                        <option value="Расходный материал">Расходный материал</option>
+                        <option value="Оборудование">Оборудование</option>
+                      </select>
+                    </td>
+                    <td className="px-3 py-2 border border-slate-300">
+                      <input
+                        type="number"
+                        value={item.quantity}
+                        onChange={(e) => handleUpdateItem(index, 'quantity', Number(e.target.value))}
+                        className="w-full px-2 py-1 border border-slate-300 rounded text-sm text-center"
+                        min="1"
+                      />
+                    </td>
+                    <td className="px-3 py-2 border border-slate-300">
+                      <input
+                        type="number"
+                        value={item.pricePerUnit}
+                        onChange={(e) => handleUpdateItem(index, 'pricePerUnit', Number(e.target.value))}
+                        className="w-full px-2 py-1 border border-slate-300 rounded text-sm text-right"
+                        min="0"
+                      />
+                    </td>
+                    <td className="px-3 py-2 text-right text-sm font-semibold text-slate-800 border border-slate-300">
+                      {item.total.toLocaleString('ru-RU')} ₽
+                    </td>
+                    <td className="px-3 py-2 text-center border border-slate-300">
+                      <button
+                        onClick={() => handleRemoveItem(index)}
+                        className="text-red-600 hover:text-red-800"
+                      >
+                        🗑️
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="border-t border-slate-300">
+                  <td className="px-3 py-2 text-left text-sm font-semibold text-slate-800">ИТОГО</td>
+                  <td colSpan={3}></td>
+                  <td className="px-3 py-2 text-right text-sm font-semibold text-blue-600">
+                    {totalAmount.toLocaleString('ru-RU')} ₽
+                  </td>
+                  <td></td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </div>
+
+        <div className="sticky bottom-0 bg-white px-6 py-4 flex justify-end gap-3 border-t border-slate-300">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 bg-slate-500 hover:bg-slate-600 text-white text-sm rounded"
+          >
+            Отмена
+          </button>
+          <button
+            onClick={handleSubmit}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded"
+          >
+            Сохранить
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // Default export
