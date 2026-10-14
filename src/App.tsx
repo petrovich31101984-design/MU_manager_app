@@ -2885,6 +2885,617 @@ function EditExpenseSheetModal({
   );
 }
 
+// ============ СОТРУДНИКИ ============
+function EmployeesPage({ data }: { data: ReturnType<typeof useData> }) {
+  const { employees, setEmployees, arrivals, expenses, nomenclature } = data;
+  const [search, setSearch] = useState('');
+  const [showAdd, setShowAdd] = useState(false);
+  const [editingEmployee, setEditingEmployee] = useState<gs.Employee | null>(null);
+  const [selectedEmployee, setSelectedEmployee] = useState<gs.Employee | null>(null);
+  const now = new Date();
+  const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+
+
+
+  // Фильтруем сотрудников
+  const searchLower = search.toLowerCase().trim();
+  
+  // Сначала фильтруем по статусу и поиску (поиск по началу ФИО)
+  const matched = searchLower === '' 
+    ? employees.filter(e => e.status !== 'Уволен')
+    : employees.filter(e => {
+        if (e.status === 'Уволен') return false;
+        const fullName = String(e.fullName ?? '').toLowerCase().trim();
+        // Проверяем, начинается ли ФИО с введённых букв
+        return fullName.startsWith(searchLower);
+      });
+  
+  // Убираем дубликаты по ФИО — оставляем только первую запись с таким ФИО
+  const seen = new Set<string>();
+  const filtered = matched.filter(e => {
+    const fullName = String(e.fullName ?? '').trim().toLowerCase();
+    if (seen.has(fullName)) {
+      return false;
+    }
+    seen.add(fullName);
+    return true;
+  });
+
+  const getArrival = (empId: string) => arrivals.filter(a => a.employeeId === empId && a.month === currentMonth).reduce((s, a) => s + a.amount, 0);
+  const getExpenseValue = (empId: string) => expenses.filter(e => e.employeeId === empId && e.month === currentMonth).reduce((s, e) => {
+    const nom = nomenclature.find(n => n.id === e.nomenclatureId);
+    return s + (nom ? nom.currentPrice * e.quantity : 0);
+  }, 0);
+  const getCalls = (empId: string) => new Set(expenses.filter(e => e.employeeId === empId && e.month === currentMonth).map(e => e.callId)).size;
+
+  const handleAdd = (form: { fullName: string; personalNumber: string; password: string; position: string; phone: string }) => {
+    // Проверка на дубликат ПЕРЕД добавлением
+    const trimmedNumber = form.personalNumber.trim();
+    const existingEmployee = employees.find(e => {
+      const existingNumber = String(e.personalNumber ?? '').trim();
+      return existingNumber === trimmedNumber;
+    });
+    
+    if (existingEmployee) {
+      return false; // Возвращаем false, чтобы модальное окно показало ошибку
+    }
+    
+    setShowAdd(false); // Закрываем окно сразу
+    
+    // Создаём нового сотрудника
+    const newEmployee: gs.Employee = {
+      id: `EMP-${String(employees.length + 1).padStart(3, '0')}`,
+      personalNumber: form.personalNumber,
+      fullName: form.fullName,
+      password: form.password,
+      status: 'Неактивен',
+      position: form.position,
+      hireDate: new Date().toISOString().split('T')[0],
+      blocked: false,
+      phone: form.phone,
+      lastActivity: '',
+      note: '',
+      shiftOpen: false,
+    };
+    
+    // Добавляем в локальное состояние
+    setEmployees([...employees, newEmployee]);
+    
+    // Отправляем в Google Sheets в фоне
+    gs.addEmployee(newEmployee).catch(err => {
+      console.error('Ошибка добавления сотрудника:', err);
+      alert('Ошибка при добавлении сотрудника. Попробуйте ещё раз.');
+    });
+    
+    return true;
+  };
+
+  // ✏️ Редактирование данных сотрудника
+  const handleEdit = (emp: gs.Employee) => {
+    setEditingEmployee(emp);
+  };
+
+  // 🔒 Блокировка/разблокировка сотрудника
+  const handleToggleBlock = async (id: string, block: boolean) => {
+    if (confirm(block ? 'Заблокировать сотрудника?\n\nСотрудник не сможет войти в систему.' : 'Разблокировать сотрудника?')) {
+      // Обновляем локальное состояние
+      setEmployees(employees.map(e => e.id === id ? { ...e, blocked: block } : e));
+      
+      // Отправляем в Google Sheets в фоне
+      gs.updateEmployee(id, { blocked: block }).catch(err => {
+        console.error('Ошибка блокировки сотрудника:', err);
+        alert('Ошибка при блокировке сотрудника. Попробуйте ещё раз.');
+      });
+    }
+  };
+
+  // 🟢 Открытие/закрытие смены сотрудника
+  const handleToggleShift = async (id: string, open: boolean) => {
+    const emp = employees.find(e => e.id === id);
+    if (!emp) return;
+    
+    // Обновляем локальное состояние
+    const updatedEmployee = { ...emp, shiftOpen: open };
+    setEmployees(employees.map(e => e.id === id ? updatedEmployee : e));
+    
+    // Отправляем в Google Sheets в фоне
+    gs.updateEmployeeShift(id, open).catch(err => {
+      console.error('Ошибка изменения статуса смены:', err);
+      alert('Ошибка при изменении статуса смены. Попробуйте ещё раз.');
+    });
+  };
+
+  // 🚫 Увольнение — сотрудник уходит в архив, персональный номер освобождается
+  const handleFire = async (id: string) => {
+    const emp = employees.find(e => e.id === id);
+    if (confirm(`Уволить сотрудника "${emp?.fullName}"?\n\nСотрудник будет перемещён в архив.\nПерсональный номер "${emp?.personalNumber}" будет освобождён.`)) {
+      // Обновляем локальное состояние
+      setEmployees(employees.map(e => e.id === id ? { ...e, status: 'Уволен', personalNumber: '' } : e));
+      
+      // Отправляем в Google Sheets в фоне
+      gs.updateEmployee(id, { status: 'Уволен', personalNumber: '' }).catch(err => {
+        console.error('Ошибка увольнения сотрудника:', err);
+        alert('Ошибка при увольнении сотрудника. Попробуйте ещё раз.');
+      });
+    }
+  };
+
+  // 🗑️ Полное удаление из базы данных
+  const handleDelete = (id: string) => {
+    const emp = employees.find(e => e.id === id);
+    if (confirm(`УДАЛИТЬ сотрудника "${emp?.fullName}"?\n\n⚠️ Это действие нельзя отменить!\nСотрудник будет полностью удалён из базы данных.`)) {
+      // Оптимистичное обновление - сразу удаляем из локального состояния
+      data.setEmployees(employees.filter(e => e.id !== id));
+      
+      // Удаляем из Google Sheets в фоне (без ожидания)
+      gs.deleteEmployee(id).catch(err => {
+        console.error('Ошибка удаления сотрудника:', err);
+        alert('Ошибка при удалении сотрудника. Попробуйте ещё раз.');
+      });
+    }
+  };
+
+  return (
+    <div className="flex flex-col h-[calc(100vh-48px)]">
+      <div className="flex gap-3 flex-shrink-0">
+        <input type="text" placeholder="Поиск по ФИО..." value={search} onChange={e => setSearch(e.target.value)}
+          className="flex-1 px-4 py-2 bg-white border border-slate-200 rounded-lg text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 shadow-sm" />
+        <button onClick={() => setShowAdd(true)} className="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg text-white font-medium shadow-sm">+ Добавить сотрудника</button>
+      </div>
+
+      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm flex-1 flex flex-col mt-4">
+        {search && (
+          <div className="px-5 py-3 bg-blue-50 border-b border-blue-200 text-sm text-blue-700 flex-shrink-0">
+            Найдено сотрудников: <span className="font-bold">{filtered.length}</span>
+            {filtered.length === 0 && ' — попробуйте изменить запрос'}
+          </div>
+        )}
+        <div className="overflow-y-auto flex-1">
+          <table className="w-full border-collapse">
+            <thead className="sticky top-0 z-10">
+              <tr className="border-b border-slate-200 text-left bg-slate-50">
+                <th className="px-5 py-3 text-xs font-medium text-slate-600 uppercase bg-slate-50">Персональный номер</th>
+                <th className="px-5 py-3 text-xs font-medium text-slate-600 uppercase bg-slate-50">Сотрудник (ФИО)</th>
+                <th className="px-5 py-3 text-xs font-medium text-slate-600 uppercase bg-slate-50">Статус</th>
+                <th className="px-5 py-3 text-xs font-medium text-slate-600 uppercase bg-slate-50">Последний вход</th>
+                <th className="px-5 py-3 text-xs font-medium text-slate-600 uppercase bg-slate-50">Действия</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((emp, index) => (
+                <tr key={`${emp.id}-${index}`} onClick={() => setSelectedEmployee(emp)} className="border-b border-slate-100 hover:bg-blue-50 hover:shadow-md transition-all duration-200 cursor-pointer">
+                  <td className="px-5 py-3 text-sm text-slate-700">{emp.personalNumber || '-'}</td>
+                  <td className="px-5 py-3">
+                    <div className="flex items-center gap-3">
+                      <div className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold text-white bg-blue-500">
+                        {(emp.fullName || '').split(' ').slice(0, 2).map(n => n[0]).join('')}
+                      </div>
+                      <div className="text-sm font-medium text-slate-800">{emp.fullName || 'Без имени'}</div>
+                    </div>
+                  </td>
+                  <td className="px-5 py-3">
+                    <div className="flex flex-wrap gap-1">
+                      {emp.blocked ? (
+                        <span className="px-2 py-1 rounded-full text-xs bg-orange-100 text-orange-700">🔒 Заблокирован</span>
+                      ) : emp.shiftOpen ? (
+                        <span className="px-2 py-1 rounded-full text-xs bg-emerald-100 text-emerald-700">🟢 Активен (смена открыта)</span>
+                      ) : (
+                        <span className="px-2 py-1 rounded-full text-xs bg-slate-100 text-slate-600">⚪ Не активен (смена закрыта)</span>
+                      )}
+                    </div>
+                  </td>
+                  <td className="px-5 py-3 text-sm text-slate-600">
+                    {emp.lastActivity ? (
+                      <div className="flex flex-col">
+                        <span className="text-slate-800">
+                          {new Date(emp.lastActivity).toLocaleDateString('ru-RU')}
+                        </span>
+                        <span className="text-xs text-slate-500">
+                          {new Date(emp.lastActivity).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                      </div>
+                    ) : (
+                      <span className="text-slate-400 italic">Никогда</span>
+                    )}
+                  </td>
+                  <td className="px-5 py-3">
+                    <div className="flex items-center gap-2">
+                      <button 
+                        onClick={(e) => { e.stopPropagation(); handleEdit(emp); }}
+                        className="text-blue-600 hover:text-blue-800 text-lg"
+                        title="✏️ Редактировать данные сотрудника"
+                      >
+                        ✏️
+                      </button>
+                      {emp.shiftOpen ? (
+                        <button 
+                          onClick={(e) => { e.stopPropagation(); handleToggleShift(emp.id, false); }}
+                          className="text-red-600 hover:text-red-800 text-lg"
+                          title="🔴 Закрыть смену"
+                        >
+                          🔴
+                        </button>
+                      ) : (
+                        <button 
+                          onClick={(e) => { e.stopPropagation(); handleToggleShift(emp.id, true); }}
+                          className="text-green-600 hover:text-green-800 text-lg"
+                          title="🟢 Открыть смену"
+                        >
+                          🟢
+                        </button>
+                      )}
+                      {emp.blocked ? (
+                        <button 
+                          onClick={(e) => { e.stopPropagation(); handleToggleBlock(emp.id, false); }}
+                          className="text-green-600 hover:text-green-800 text-lg"
+                          title="🔓 Разблокировать сотрудника"
+                        >
+                          🔓
+                        </button>
+                      ) : (
+                        <button 
+                          onClick={(e) => { e.stopPropagation(); handleToggleBlock(emp.id, true); }}
+                          className="text-orange-600 hover:text-orange-800 text-lg"
+                          title="🔒 Заблокировать сотрудника (например, потерял телефон)"
+                        >
+                          🔒
+                        </button>
+                      )}
+                      <button 
+                        onClick={(e) => { e.stopPropagation(); handleFire(emp.id); }}
+                        className="text-red-600 hover:text-red-800 text-lg"
+                        title="🚫 Уволить (переместить в архив, освободить персональный номер)"
+                      >
+                        🚫
+                      </button>
+                      <button 
+                        onClick={(e) => { e.stopPropagation(); handleDelete(emp.id); }}
+                        className="text-gray-600 hover:text-gray-800 text-lg"
+                        title="🗑️ Удалить из базы данных (безвозвратно)"
+                      >
+                        🗑️
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {/* Добавляем пустые строки до 10, если сотрудников меньше */}
+              {filtered.length < 10 && Array.from({ length: 10 - filtered.length }).map((_, i) => (
+                <tr key={`empty-${i}`} className="border-b border-slate-100">
+                  <td className="px-5 py-3 text-sm text-slate-300">-</td>
+                  <td className="px-5 py-3 text-sm text-slate-300">-</td>
+                  <td className="px-5 py-3 text-sm text-slate-300">-</td>
+                  <td className="px-5 py-3 text-sm text-slate-300">-</td>
+                  <td className="px-5 py-3 text-sm text-slate-300">-</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {filtered.length === 0 && (
+          <div className="p-8 text-center text-slate-500">
+            <div className="text-3xl mb-2">👥</div>
+            <p>{search ? 'Ничего не найдено' : 'Нет сотрудников'}</p>
+          </div>
+        )}
+      </div>
+      {showAdd && (
+        <AddEmployeeModal key={Date.now()} employees={employees} onClose={() => setShowAdd(false)} onAdd={handleAdd} />
+      )}
+      {editingEmployee && (
+        <EditEmployeeModal 
+          employee={editingEmployee}
+          employees={employees}
+          onClose={() => setEditingEmployee(null)} 
+          onSave={(id, updates) => {
+            // Закрываем окно сразу
+            setEditingEmployee(null);
+            
+            // Обновляем локальное состояние
+            setEmployees(employees.map(e => e.id === id ? { ...e, ...updates } : e));
+            
+            // Отправляем в Google Sheets в фоне
+            gs.updateEmployee(id, updates).catch(err => {
+              console.error('Ошибка обновления сотрудника:', err);
+              alert('Ошибка при сохранении изменений. Попробуйте ещё раз.');
+            });
+          }}
+        />
+      )}
+      {selectedEmployee && (
+        <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50 p-4" onClick={() => setSelectedEmployee(null)}>
+          <div className="bg-white rounded-2xl border border-slate-200 w-full max-w-md shadow-2xl" onClick={e => e.stopPropagation()}>
+            <div className="p-6 border-b border-slate-200 flex items-center justify-between">
+              <h3 className="text-lg font-bold text-slate-800">Личный кабинет сотрудника</h3>
+              <button onClick={() => setSelectedEmployee(null)} className="text-slate-400 hover:text-slate-600 text-2xl">×</button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="flex items-center gap-4 mb-6">
+                <div className="w-16 h-16 rounded-full flex items-center justify-center text-xl font-bold text-white bg-blue-500">
+                  {(selectedEmployee.fullName || '').split(' ').slice(0, 2).map(n => n[0]).join('')}
+                </div>
+                <div>
+                  <div className="text-xl font-semibold text-slate-800">{selectedEmployee.fullName || 'Без имени'}</div>
+                  <div className="text-sm text-slate-500">Персональный номер: {selectedEmployee.personalNumber || 'Не указан'}</div>
+                </div>
+              </div>
+              <div className="space-y-3">
+                <div className="flex justify-between py-2 border-b border-slate-100">
+                  <span className="text-sm text-slate-600">Должность</span>
+                  <span className="text-sm font-medium text-slate-800">{selectedEmployee.position}</span>
+                </div>
+                <div className="flex justify-between py-2 border-b border-slate-100">
+                  <span className="text-sm text-slate-600">Телефон</span>
+                  <span className="text-sm font-medium text-slate-800">{selectedEmployee.phone || 'Не указан'}</span>
+                </div>
+                <div className="flex justify-between py-2">
+                  <span className="text-sm text-slate-600">Статус</span>
+                  <span className={`px-2 py-1 rounded-full text-xs ${
+                    selectedEmployee.status === 'Активен' ? 'bg-emerald-100 text-emerald-700' :
+                    selectedEmployee.status === 'Отпуск' ? 'bg-yellow-100 text-yellow-700' : 'bg-slate-100 text-slate-600'
+                  }`}>{selectedEmployee.status}</span>
+                </div>
+              </div>
+            </div>
+            <div className="p-6 border-t border-slate-200 flex justify-end">
+              <button onClick={() => setSelectedEmployee(null)} className="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg text-white font-medium">Закрыть</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AddEmployeeModal({ employees, onClose, onAdd }: { employees: gs.Employee[]; onClose: () => void; onAdd: (form: any) => boolean }) {
+  const [form, setForm] = useState({ fullName: '', personalNumber: '', password: '', position: 'Врач', phone: '' });
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSubmit = () => {
+    setError(null);
+    
+    // Проверка уникальности персонального номера
+    const trimmedNumber = form.personalNumber.trim();
+    
+    if (!trimmedNumber) {
+      setError('Персональный номер не может быть пустым');
+      return;
+    }
+    
+    // Проверка на дубликат
+    const existingEmployee = employees.find(e => {
+      const existingNumber = String(e.personalNumber ?? '').trim();
+      return existingNumber === trimmedNumber;
+    });
+    
+    if (existingEmployee) {
+      const errorMsg = `Сотрудник с персональным номером "${trimmedNumber}" уже существует (${existingEmployee.fullName})`;
+      setError(errorMsg);
+      return; // Не закрываем окно
+    }
+    
+    const result = onAdd(form);
+    
+    if (!result) {
+      // Получаем имя существующего сотрудника для сообщения
+      const existingEmp = employees.find(e => String(e.personalNumber ?? '').trim() === trimmedNumber);
+      const errorMsg = existingEmp 
+        ? `Сотрудник с персональным номером "${trimmedNumber}" уже существует (${existingEmp.fullName})`
+        : `Сотрудник с персональным номером "${trimmedNumber}" уже существует`;
+      setError(errorMsg);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl border border-slate-200 w-full max-w-md shadow-2xl">
+        <div className="p-6 border-b border-slate-200">
+          <h3 className="text-lg font-bold text-slate-800">Добавить сотрудника</h3>
+        </div>
+        <div className="p-6 space-y-4">
+          {error && (
+            <div className="p-4 bg-red-50 border-2 border-red-300 rounded-lg text-sm text-red-700 flex items-start gap-3">
+              <span className="text-xl flex-shrink-0">⚠️</span>
+              <div className="flex-1">
+                <div className="font-semibold mb-1">Ошибка добавления</div>
+                <div>{error}</div>
+              </div>
+            </div>
+          )}
+          <div>
+            <label className="text-sm text-slate-600 mb-1 block">ФИО *</label>
+            <input type="text" value={form.fullName} onChange={e => { setForm({ ...form, fullName: e.target.value }); setError(null); }}
+              className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-slate-800 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" />
+          </div>
+          <div>
+            <label className="text-sm text-slate-600 mb-1 block">Персональный номер *</label>
+            <input 
+              type="text" 
+              value={form.personalNumber} 
+              onChange={e => { setForm({ ...form, personalNumber: e.target.value }); setError(null); }}
+              className={`w-full px-3 py-2 bg-white border-2 rounded-lg text-slate-800 focus:outline-none focus:ring-2 transition-all ${
+                error 
+                  ? 'border-red-400 focus:border-red-500 focus:ring-red-500/30 bg-red-50' 
+                  : 'border-slate-300 focus:border-blue-500 focus:ring-blue-500/20'
+              }`} 
+            />
+            {error && (
+              <p className="text-xs text-red-600 mt-1 flex items-center gap-1">
+                <span>⚠️</span>
+                <span>Проверьте персональный номер</span>
+              </p>
+            )}
+          </div>
+          <div>
+            <label className="text-sm text-slate-600 mb-1 block">Пароль *</label>
+            <input type="password" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })}
+              className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-slate-800 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" />
+          </div>
+          <div>
+            <label className="text-sm text-slate-600 mb-1 block">Должность *</label>
+            <select value={form.position} onChange={e => setForm({ ...form, position: e.target.value })}
+              className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-slate-800 focus:outline-none focus:border-blue-500">
+              <option>Врач</option><option>Фельдшер</option><option>Медсестра</option>
+            </select>
+          </div>
+          <div>
+            <label className="text-sm text-slate-600 mb-1 block">Телефон</label>
+            <input type="text" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })}
+              className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-slate-800 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" />
+          </div>
+        </div>
+        <div className="p-6 border-t border-slate-200 flex justify-end gap-3">
+          <button onClick={onClose} className="px-4 py-2 rounded-lg text-slate-600 hover:bg-slate-100">Отмена</button>
+          <button onClick={handleSubmit} disabled={!form.fullName || !form.personalNumber || !form.password}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-300 rounded-lg text-white font-medium">Добавить</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============ РЕДАКТИРОВАНИЕ СОТРУДНИКА ============
+function EditEmployeeModal({ 
+  employee, 
+  employees,
+  onClose, 
+  onSave 
+}: { 
+  employee: gs.Employee;
+  employees: gs.Employee[];
+  onClose: () => void; 
+  onSave: (id: string, updates: Partial<gs.Employee>) => void 
+}) {
+  const [form, setForm] = useState({
+    fullName: String(employee.fullName ?? ''),
+    personalNumber: String(employee.personalNumber ?? ''),
+    position: String(employee.position ?? ''),
+    phone: String(employee.phone ?? ''),
+    note: String(employee.note ?? ''),
+  });
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSubmit = () => {
+    setError(null);
+    
+    // Проверка уникальности персонального номера (исключая текущего сотрудника)
+    const trimmedNumber = String(form.personalNumber ?? '').trim();
+    
+    if (!trimmedNumber) {
+      setError('Персональный номер не может быть пустым');
+      return;
+    }
+    
+    const existingEmployee = employees.find(e => 
+      e.id !== employee.id && 
+      String(e.personalNumber ?? '').trim() === trimmedNumber
+    );
+    
+    if (existingEmployee) {
+      setError(`Персональный номер "${trimmedNumber}" уже используется сотрудником "${existingEmployee.fullName}"`);
+      return;
+    }
+    
+    onSave(employee.id, {
+      fullName: String(form.fullName ?? ''),
+      personalNumber: trimmedNumber,
+      position: String(form.position ?? ''),
+      phone: String(form.phone ?? ''),
+      note: String(form.note ?? ''),
+    });
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl border border-slate-200 w-full max-w-md shadow-2xl">
+        <div className="p-6 border-b border-slate-200 flex items-center justify-between">
+          <h3 className="text-lg font-bold text-slate-800">✏️ Редактирование сотрудника</h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-2xl">×</button>
+        </div>
+        <div className="p-6 space-y-4">
+          {error && (
+            <div className="p-4 bg-red-50 border-2 border-red-300 rounded-lg text-sm text-red-700 flex items-start gap-3">
+              <span className="text-xl flex-shrink-0">⚠️</span>
+              <div className="flex-1">
+                <div className="font-semibold mb-1">Ошибка</div>
+                <div>{error}</div>
+              </div>
+            </div>
+          )}
+          <div>
+            <label className="text-sm text-slate-600 mb-1 block">ФИО *</label>
+            <input 
+              type="text" 
+              value={form.fullName} 
+              onChange={e => { setForm({ ...form, fullName: e.target.value }); setError(null); }}
+              className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-slate-800 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" 
+            />
+          </div>
+          <div>
+            <label className="text-sm text-slate-600 mb-1 block">Персональный номер *</label>
+            <input 
+              type="text" 
+              value={form.personalNumber} 
+              onChange={e => { setForm({ ...form, personalNumber: e.target.value }); setError(null); }}
+              className={`w-full px-3 py-2 bg-white border-2 rounded-lg text-slate-800 focus:outline-none focus:ring-2 transition-all ${
+                error 
+                  ? 'border-red-400 focus:border-red-500 focus:ring-red-500/30 bg-red-50' 
+                  : 'border-slate-300 focus:border-blue-500 focus:ring-blue-500/20'
+              }`} 
+            />
+            {error && (
+              <p className="text-xs text-red-600 mt-1 flex items-center gap-1">
+                <span>⚠️</span>
+                <span>Проверьте персональный номер</span>
+              </p>
+            )}
+          </div>
+          <div>
+            <label className="text-sm text-slate-600 mb-1 block">Должность *</label>
+            <select 
+              value={form.position} 
+              onChange={e => setForm({ ...form, position: e.target.value })}
+              className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-slate-800 focus:outline-none focus:border-blue-500"
+            >
+              <option>Врач</option>
+              <option>Фельдшер</option>
+              <option>Медсестра</option>
+            </select>
+          </div>
+          <div>
+            <label className="text-sm text-slate-600 mb-1 block">Телефон</label>
+            <input 
+              type="text" 
+              value={form.phone} 
+              onChange={e => setForm({ ...form, phone: e.target.value })}
+              className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-slate-800 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" 
+            />
+          </div>
+          <div>
+            <label className="text-sm text-slate-600 mb-1 block">Примечание</label>
+            <textarea 
+              value={form.note} 
+              onChange={e => setForm({ ...form, note: e.target.value })}
+              rows={3}
+              className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-slate-800 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 resize-none" 
+            />
+          </div>
+        </div>
+        <div className="p-6 border-t border-slate-200 flex justify-end gap-3">
+          <button onClick={onClose} className="px-4 py-2 rounded-lg text-slate-600 hover:bg-slate-100">Отмена</button>
+          <button 
+            onClick={handleSubmit} 
+            disabled={!form.fullName || !form.personalNumber || !form.position}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-300 rounded-lg text-white font-medium"
+          >
+            💾 Сохранить
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // Default export
 export default function App() {
   return <div>App component - to be implemented</div>;
