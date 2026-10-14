@@ -695,3 +695,14 @@ function ArrivalCardModal({
                 className={`px-4 py-2 rounded-lg text-sm font-medium ${
                   selectedCategory === 'Расходный материал' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                 }`}
+              >
+                🩹 Расходники
+              </button>
+              <button 
+                onClick={() => setSelectedCategory('Оборудование')}
+                className={`px-4 py-2 rounded-lg text-sm font-medium ${
+                  selectedCategory === 'Оборудование' ? 'bg-purple-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                🧰 Оборудование
+              </button>
