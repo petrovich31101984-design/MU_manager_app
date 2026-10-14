@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <!-- Замените этот файл вашим логотипом -->
+  <rect width="512" height="512" rx="96" fill="#1d4ed8"/>
+  <text x="256" y="280" text-anchor="middle" fill="white" font-family="Arial" font-weight="bold" font-size="120">СМУ</text>
+</svg>
