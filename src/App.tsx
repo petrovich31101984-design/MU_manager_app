@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import * as gs from './services/googleSheets';
-
-const LOGO_URL = '/logo.svg';
+import { LOGO_URL } from './logoData';
 
 // ============ ХУК useData ============
 function useData() {
@@ -511,7 +510,7 @@ function EditNomenclatureModal({ item, nomenclature, setNomenclature, onClose }:
 
 // ============ ПРИХОД ============
 function ArrivalPage({ data }: { data: ReturnType<typeof useData> }) {
-  const { employees, arrivals, setArrivals, refresh } = data;
+  const { arrivals, setArrivals, refresh } = data;
   const [selectedMonth, setSelectedMonth] = useState(() => {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
