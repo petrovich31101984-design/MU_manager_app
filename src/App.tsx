@@ -1186,7 +1186,7 @@ function ExpenseSheetView({
 
 // ============ РАСХОД У СОТРУДНИКА ============
 // ============ АРХИВ ============
-function ArchivePage({ data }: {  ReturnType<typeof useData> }) {
+function ArchivePage({ data }: { data: ReturnType<typeof useData> }) {
   const { employees, expenseSheets, setExpenseSheets, arrivals, setArrivals } = data;
   const [filterType, setFilterType] = useState<'month' | 'quarter' | 'halfyear' | 'year' | 'all'>('month');
   const [selectedMonth, setSelectedMonth] = useState(() => {
@@ -1240,6 +1240,536 @@ function ArchivePage({ data }: {  ReturnType<typeof useData> }) {
         return [selectedMonth];
     }
   };
+
+  // Фильтрация по выбранному периоду (только архивированные)
+  const archivedSheets = expenseSheets.filter(s => {
+    if (!s.archived) return false;
+    if (filterType === 'all') return true;
+    const periodMonths = getPeriodMonths();
+    return periodMonths.includes(s.month);
+  });
+
+  // Фильтрация архивированных карт прихода
+  const archivedArrivals = arrivals.filter(a => {
+    if (!a.archived) return false;
+    if (filterType === 'all') return true;
+    const periodMonths = getPeriodMonths();
+    return periodMonths.includes(a.month);
+  });
+
+  // Расчёт статистики
+  const totalExpense = archivedSheets.reduce((sum, s) => sum + s.totalAmount, 0);
+  const sheetsCount = archivedSheets.length;
+  const totalArrivalAmount = archivedArrivals.reduce((sum, a) => sum + a.amount, 0);
+  const arrivalsCount = archivedArrivals.length;
+
+  // Генерация списка месяцев
+  const generateMonthOptions = () => {
+    const months = [];
+    const current = new Date();
+    for (let i = 0; i < 12; i++) {
+      const date = new Date(current.getFullYear(), current.getMonth() - i, 1);
+      const monthStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+      const monthName = date.toLocaleString('ru-RU', { month: 'long', year: 'numeric' });
+      months.push({ value: monthStr, label: monthName });
+    }
+    return months;
+  };
+
+  // Получение текста для отображения периода
+  const getPeriodLabel = () => {
+    const now = new Date();
+    switch (filterType) {
+      case 'month':
+        return new Date(selectedMonth + '-01').toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' });
+      case 'quarter': {
+        const quarter = Math.floor(now.getMonth() / 3) + 1;
+        return `${quarter} квартал ${now.getFullYear()}`;
+      }
+      case 'halfyear': {
+        const halfyear = Math.floor(now.getMonth() / 6) + 1;
+        return `${halfyear} полугодие ${now.getFullYear()}`;
+      }
+      case 'year':
+        return `${now.getFullYear()} год`;
+      case 'all':
+        return 'Всё время';
+      default:
+        return '';
+    }
+  };
+
+  // Восстановление из архива
+  const handleRestoreSheet = async (id: string) => {
+    if (!confirm('Восстановить лист расхода из архива?')) return;
+    setExpenseSheets(expenseSheets.map(s => s.id === id ? { ...s, archived: false } : s));
+    try {
+      await gs.restoreExpenseSheet(id);
+    } catch (err) {
+      console.error('Ошибка восстановления:', err);
+      alert('Ошибка при восстановлении. Попробуйте ещё раз.');
+    }
+  };
+
+  // Восстановление карты прихода из архива
+  const handleRestoreArrival = async (id: string) => {
+    if (!confirm('Восстановить карту прихода из архива?')) return;
+    setArrivals(arrivals.map(a => a.id === id ? { ...a, archived: false } : a));
+    try {
+      await gs.restoreArrival(id);
+    } catch (err) {
+      console.error('Ошибка восстановления:', err);
+      alert('Ошибка при восстановлении. Попробуйте ещё раз.');
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex justify-between items-start">
+        <div>
+          <h2 className="text-2xl font-bold text-slate-800">🗄️ Архив</h2>
+        </div>
+        <div className="flex gap-2">
+          <select
+            value={filterType}
+            onChange={(e) => setFilterType(e.target.value as any)}
+            className="px-4 py-2 bg-white border border-slate-300 rounded-lg text-sm text-slate-800 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+          >
+            <option value="month">Месяц</option>
+            <option value="quarter">Квартал</option>
+            <option value="halfyear">Полгода</option>
+            <option value="year">Год</option>
+            <option value="all">Всё время</option>
+          </select>
+          {filterType === 'month' && (
+            <select
+              value={selectedMonth}
+              onChange={(e) => setSelectedMonth(e.target.value)}
+              className="px-4 py-2 bg-white border border-slate-300 rounded-lg text-sm text-slate-800 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+            >
+              {generateMonthOptions().map(month => (
+                <option key={month.value} value={month.value}>
+                  {month.label}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
+      </div>
+
+      {/* Карточки статистики */}
+      <div className="grid grid-cols-3 gap-4">
+        <div 
+          onClick={() => setShowArchiveList(true)}
+          className="bg-white rounded-lg p-4 border border-slate-200 shadow-sm flex flex-col justify-between cursor-pointer hover:border-blue-500 hover:shadow-md transition-all"
+        >
+          <div className="text-xs text-slate-500 uppercase mb-2">ЛИСТОВ РАСХОДА В АРХИВЕ</div>
+          <div className="text-2xl font-bold text-slate-600">{sheetsCount}</div>
+          <div className="text-xs text-slate-500 mt-2 uppercase">{getPeriodLabel()}</div>
+        </div>
+
+        <div 
+          onClick={() => setShowArrivalsArchive(true)}
+          className="bg-white rounded-lg p-4 border border-slate-200 shadow-sm flex flex-col justify-between cursor-pointer hover:border-green-500 hover:shadow-md transition-all"
+        >
+          <div className="text-xs text-slate-500 uppercase mb-2">КАРТ ПРИХОДА В АРХИВЕ</div>
+          <div className="text-2xl font-bold text-green-600">{arrivalsCount}</div>
+          <div className="text-xs text-slate-500 mt-2 uppercase">{getPeriodLabel()}</div>
+        </div>
+        
+        <div 
+          onClick={() => setShowFiredEmployees(true)}
+          className="bg-white rounded-lg p-4 border border-slate-200 shadow-sm flex flex-col justify-between cursor-pointer hover:border-red-500 hover:shadow-md transition-all"
+        >
+          <div className="text-xs text-slate-500 uppercase mb-2">СОТРУДНИКИ</div>
+          <div className="text-2xl font-bold text-red-600">{firedEmployees.length}</div>
+          <div className="text-xs text-slate-500 mt-2 uppercase">Уволено</div>
+        </div>
+      </div>
+
+      {/* Модальное окно со списком архивированных листов */}
+      {showArchiveList && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-6xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="sticky top-0 bg-slate-100 px-6 py-4 flex justify-between items-center border-b border-slate-300">
+              <h2 className="text-xl font-bold text-slate-800">🗄️ Архивированные листы расхода</h2>
+              <button 
+                onClick={() => setShowArchiveList(false)}
+                className="text-slate-500 hover:text-slate-700 text-2xl"
               >
-                🧰 Оборудование
+                ×
               </button>
+            </div>
+            <div className="p-6 space-y-6">
+              {archivedSheets.length === 0 ? (
+                <div className="bg-white rounded-xl p-8 text-center text-slate-500 border border-slate-200">
+                  <p>Нет архивированных листов расхода за {getPeriodLabel()}</p>
+                </div>
+              ) : (
+                archivedSheets.map(sheet => (
+                  <ExpenseSheetView
+                    key={sheet.id}
+                    sheet={sheet}
+                    employees={employees}
+                    onArchive={() => {}}
+                    onEdit={() => {}}
+                    onRestore={handleRestoreSheet}
+                    isArchived={true}
+                  />
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Модальное окно со списком уволенных сотрудников */}
+      {showFiredEmployees && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="sticky top-0 bg-slate-100 px-6 py-4 flex justify-between items-center border-b border-slate-300">
+              <h2 className="text-xl font-bold text-slate-800">👥 Уволенные сотрудники</h2>
+              <button 
+                onClick={() => setShowFiredEmployees(false)}
+                className="text-slate-500 hover:text-slate-700 text-2xl"
+              >
+                ×
+              </button>
+            </div>
+            <div className="p-6">
+              {firedEmployees.length === 0 ? (
+                <div className="bg-white rounded-xl p-8 text-center text-slate-500 border border-slate-200">
+                  <p>Нет уволенных сотрудников</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {firedEmployees.map(emp => (
+                    <div key={emp.id} className="bg-white rounded-lg border border-slate-200 p-4 shadow-sm hover:shadow-md transition-shadow">
+                      <div className="flex items-start gap-3">
+                        <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center text-red-600 font-bold text-lg">
+                          {emp.fullName.split(' ').map(n => n[0]).join('')}
+                        </div>
+                        <div className="flex-1">
+                          <div className="font-semibold text-slate-800">{emp.fullName}</div>
+                          <div className="text-sm text-slate-500 mt-1">{emp.position}</div>
+                          {emp.phone && (
+                            <div className="text-xs text-slate-400 mt-2">
+                              Телефон: {emp.phone}
+                            </div>
+                          )}
+                          {emp.hireDate && (
+                            <div className="text-xs text-blue-600 mt-1">
+                              Дата найма: {new Date(emp.hireDate).toLocaleDateString('ru-RU')}
+                            </div>
+                          )}
+                          <div className="text-xs text-red-600 mt-1">
+                            Дата увольнения: {new Date().toLocaleDateString('ru-RU')}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Модальное окно со списком архивированных карт прихода */}
+      {showArrivalsArchive && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-6xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="sticky top-0 bg-slate-100 px-6 py-4 flex justify-between items-center border-b border-slate-300">
+              <h2 className="text-xl font-bold text-slate-800">📥 Архивированные карты прихода</h2>
+              <button 
+                onClick={() => setShowArrivalsArchive(false)}
+                className="text-slate-500 hover:text-slate-700 text-2xl"
+              >
+                ×
+              </button>
+            </div>
+            <div className="p-6 space-y-6">
+              {archivedArrivals.length === 0 ? (
+                <div className="bg-white rounded-xl p-8 text-center text-slate-500 border border-slate-200">
+                  <p>Нет архивированных карт прихода за {getPeriodLabel()}</p>
+                </div>
+              ) : (
+                archivedArrivals.map(arrival => (
+                  <div key={arrival.id} className="bg-white border border-slate-300 rounded-lg shadow-sm overflow-hidden">
+                    <div className="bg-slate-100 px-6 py-4 border-b border-slate-300">
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <h3 className="text-lg font-bold text-slate-800">Карта прихода</h3>
+                          <p className="text-sm text-slate-600 mt-1">
+                            {new Date(arrival.date).toLocaleDateString('ru-RU')} • {arrival.employeeName || 'Сотрудник'}
+                          </p>
+                        </div>
+                        <button
+                          onClick={() => handleRestoreArrival(arrival.id)}
+                          className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm rounded transition-colors"
+                        >
+                          ♻️ Восстановить
+                        </button>
+                      </div>
+                    </div>
+                    <div className="p-6">
+                      <div className="grid grid-cols-2 gap-4 mb-4">
+                        <div>
+                          <span className="text-sm text-slate-600">Сумма:</span>
+                          <span className="ml-2 text-lg font-bold text-emerald-600">{arrival.amount.toLocaleString('ru-RU')} ₽</span>
+                        </div>
+                        <div>
+                          <span className="text-sm text-slate-600">Тип:</span>
+                          <span className="ml-2 text-sm font-semibold">{arrival.type}</span>
+                        </div>
+                      </div>
+                      {arrival.items && arrival.items.length > 0 && (
+                        <div>
+                          <h4 className="text-sm font-semibold text-slate-700 mb-2">Позиции:</h4>
+                          <div className="space-y-2">
+                            {arrival.items.map((item, idx) => {
+                              const nomenclatureItem = data.nomenclature.find(n => n.id === item.nomenclatureId);
+                              return (
+                                <div key={idx} className="flex justify-between items-center p-2 bg-slate-50 rounded">
+                                  <span className="text-sm text-slate-700">{nomenclatureItem?.name || 'Номенклатура'}</span>
+                                  <span className="text-sm font-semibold text-slate-800">
+                                    {item.quantity} × {item.price.toLocaleString('ru-RU')} ₽ = {item.total.toLocaleString('ru-RU')} ₽
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ExpensePage({ data }: { data: ReturnType<typeof useData> }) {
+  const { employees, expenseSheets, setExpenseSheets, nomenclature } = data;
+  const [editingSheet, setEditingSheet] = useState<gs.ExpenseSheet | null>(null);
+  const [selectedMonth, setSelectedMonth] = useState(() => {
+    // По умолчанию показываем предыдущий месяц
+    const now = new Date();
+    const previousMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    return `${previousMonth.getFullYear()}-${String(previousMonth.getMonth() + 1).padStart(2, '0')}`;
+  });
+
+  // Фильтрация по месяцу (для отображения)
+  const filteredSheets = expenseSheets.filter(s => s.month === selectedMonth && !s.archived);
+
+  // Все листы за месяц (включая архивированные) для расчёта статистики
+  const allSheetsForMonth = expenseSheets.filter(s => s.month === selectedMonth);
+
+  // Расчёт статистики за выбранный месяц (включая архивированные)
+  const totalExpense = allSheetsForMonth.reduce((sum, s) => sum + s.totalAmount, 0);
+  const sheetsCount = allSheetsForMonth.length;
+  const exceededLimit = allSheetsForMonth.filter(s => {
+    if (s.therapyCost === 0) return false;
+    const limit = (s.totalAmount * 100) / s.therapyCost;
+    return limit > 5 || limit < 2.5; // Лимит вне диапазона 2.5% - 5%
+  }).length;
+
+  // Генерация списка месяцев
+  const generateMonthOptions = () => {
+    const months = [];
+    const current = new Date();
+    for (let i = 0; i < 12; i++) {
+      const date = new Date(current.getFullYear(), current.getMonth() - i, 1);
+      const monthStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+      const monthName = date.toLocaleString('ru-RU', { month: 'long', year: 'numeric' });
+      months.push({ value: monthStr, label: monthName });
+    }
+    return months;
+  };
+
+  // Архивирование листа расхода
+  const handleArchiveSheet = async (id: string) => {
+    if (!confirm('Отправить лист расхода в архив?')) return;
+    setExpenseSheets(expenseSheets.map(s => s.id === id ? { ...s, archived: true } : s));
+    try {
+      await gs.archiveExpenseSheet(id);
+    } catch (err) {
+      console.error('Ошибка архивирования:', err);
+      alert('Ошибка при архивировании. Попробуйте ещё раз.');
+    }
+  };
+
+  // Редактирование листа расхода
+  const handleEditSheet = (sheet: gs.ExpenseSheet) => {
+    setEditingSheet(sheet);
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex justify-between items-start">
+        <div>
+          <h2 className="text-2xl font-bold text-slate-800">📤 Расход у сотрудника</h2>
+          <p className="text-slate-500 text-sm mt-1">Листы расхода</p>
+        </div>
+        <select
+          value={selectedMonth}
+          onChange={(e) => setSelectedMonth(e.target.value)}
+          className="px-4 py-2 bg-white border border-slate-300 rounded-lg text-sm text-slate-800 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+        >
+          {generateMonthOptions().map(month => (
+            <option key={month.value} value={month.value}>
+              {month.label}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {/* Карточки статистики */}
+      <div className="grid grid-cols-3 gap-4">
+        <div className="bg-white rounded-xl p-6 border border-slate-200 shadow-sm flex flex-col justify-between min-h-[140px]">
+          <div className="text-xs text-slate-500 uppercase mb-2">ОБЩАЯ СУММА РАСХОДА ЗА МЕСЯЦ</div>
+          <div className="text-2xl font-bold text-emerald-600 min-h-[40px] flex items-center">{totalExpense.toLocaleString('ru-RU')} ₽</div>
+          <div className="text-xs text-slate-500 mt-2 uppercase">{new Date(selectedMonth + '-01').toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' })}</div>
+        </div>
+        <div className="bg-white rounded-xl p-6 border border-slate-200 shadow-sm flex flex-col justify-between min-h-[140px]">
+          <div className="text-xs text-slate-500 uppercase mb-2">ЛИСТОВ РАСХОДА ЗА МЕСЯЦ</div>
+          <div className="text-2xl font-bold text-blue-600 min-h-[40px] flex items-center">{sheetsCount}</div>
+          <div className="text-xs text-slate-500 mt-2 uppercase">{new Date(selectedMonth + '-01').toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' })}</div>
+        </div>
+        <div className="bg-white rounded-xl p-6 border border-slate-200 shadow-sm flex flex-col justify-between min-h-[140px]">
+          <div className="text-xs text-slate-500 uppercase mb-2">ЛИСТОВ С ОТКЛОНЕНИЕМ ОТ ЛИМИТА</div>
+          <div className="text-2xl font-bold text-red-600 min-h-[40px] flex items-center">{exceededLimit}</div>
+          <div className="text-xs text-slate-500 mt-2 uppercase">{new Date(selectedMonth + '-01').toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' })}</div>
+        </div>
+      </div>
+
+      {/* Листы расхода */}
+      <div className="space-y-6">
+        {filteredSheets.length === 0 ? (
+          <div className="bg-white rounded-xl p-8 text-center text-slate-500 border border-slate-200">
+            <p>Нет листов расхода за выбранный месяц</p>
+          </div>
+        ) : (
+          filteredSheets.map(sheet => (
+            <ExpenseSheetView 
+              key={sheet.id} 
+              sheet={sheet} 
+              employees={employees}
+              onArchive={handleArchiveSheet}
+              onEdit={handleEditSheet}
+            />
+          ))
+        )}
+      </div>
+
+      {/* Модальное окно редактирования */}
+      {editingSheet && (
+        <EditExpenseSheetModal
+          sheet={editingSheet}
+          employees={employees}
+          nomenclature={nomenclature}
+          onClose={() => setEditingSheet(null)}
+          onSave={(updatedSheet) => {
+            setExpenseSheets(expenseSheets.map(s => s.id === updatedSheet.id ? updatedSheet : s));
+            gs.updateExpenseSheet(updatedSheet.id, updatedSheet).catch(err => {
+              console.error('Ошибка обновления листа расхода:', err);
+              alert('Ошибка при обновлении листа расхода. Попробуйте ещё раз.');
+            });
+            setEditingSheet(null);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ============ ОСТАТОК У СОТРУДНИКА ============
+function BalancePage({ data }: { data: ReturnType<typeof useData> }) {
+  const { employees, nomenclature, arrivals, expenseSheets } = data;
+  
+  // Получаем всех сотрудников, кроме уволенных (включая Неактивен, Отпуск и т.д.)
+  // Убираем дубликаты по ФИО — оставляем только первую запись с таким ФИО
+  const seenNames = new Set<string>();
+  const allEmployees = employees.filter(e => {
+    if (e.status === 'Уволен') return false;
+    const fullName = String(e.fullName ?? '').trim().toLowerCase();
+    if (seenNames.has(fullName)) {
+      return false;
+    }
+    seenNames.add(fullName);
+    return true;
+  });
+  
+  // Отладка: выводим всех сотрудников и их статусы
+  console.log('👥 ВСЕ СОТРУДНИКИ (включая уволенных):', employees.map(e => ({
+    id: e.id,
+    fullName: e.fullName,
+    status: e.status,
+    blocked: e.blocked,
+    shiftOpen: e.shiftOpen
+  })));
+  
+  console.log('✅ СОТРУДНИКИ ДЛЯ ОСТАТКОВ (без дубликатов и уволенных):', allEmployees.map(e => ({
+    id: e.id,
+    fullName: e.fullName,
+    status: e.status
+  })));
+  
+  // Проверяем, есть ли Григорьева в списке
+  const grigorieva = employees.find(e => e.fullName.includes('Григорьева'));
+  if (grigorieva) {
+    console.log('🔍 ГРИГОРЬЕВА найдена:', {
+      id: grigorieva.id,
+      fullName: grigorieva.fullName,
+      status: grigorieva.status,
+      isInAllEmployees: allEmployees.some(e => e.id === grigorieva.id)
+    });
+    
+    // Проверяем приходы Григорьевой
+    const grigorievaArrivals = arrivals.filter(a => a.employeeId === grigorieva.id);
+    console.log('📥 Приходы Григорьевой:', grigorievaArrivals.length, grigorievaArrivals.map(a => ({
+      id: a.id,
+      employeeId: a.employeeId,
+      amount: a.amount,
+      archived: a.archived,
+      itemsCount: Array.isArray(a.items) ? a.items.length : 'N/A'
+    })));
+  } else {
+    console.warn('⚠️ ГРИГОРЬЕВА НЕ НАЙДЕНА в списке сотрудников!');
+  }
+
+  // Отладочная информация - выводим все приходы
+  console.log('📊 ВСЕ ПРИХОДЫ:', arrivals.map(a => ({
+    id: a.id,
+    employeeId: a.employeeId,
+    employeeName: a.employeeName,
+    amount: a.amount,
+    archived: a.archived,
+    items: a.items,
+    itemsType: typeof a.items,
+    isArray: Array.isArray(a.items),
+    itemsLength: Array.isArray(a.items) ? a.items.length : 'N/A'
+  })));
+  
+  console.log('👥 ВСЕ СОТРУДНИКИ:', allEmployees.map(e => ({
+    id: e.id,
+    fullName: e.fullName,
+    status: e.status
+  })));
+  
+  // Проверяем приходы для каждого сотрудника
+  allEmployees.forEach((emp: gs.Employee) => {
+    const empArrivals = arrivals.filter(a => a.employeeId === emp.id && a.archived !== true);
+    console.log(`📥 Приходы для ${emp.fullName} (${emp.id}):`, empArrivals.length, empArrivals.map(a => ({
+      id: a.id,
+      amount: a.amount,
+      items: a.items,
+      itemsType: typeof a.items,
+      isArray: Array.isArray(a.items)
+    })));
+  });
