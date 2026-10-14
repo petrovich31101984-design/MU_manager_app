@@ -1,6 +1,26 @@
 import { useState, useEffect, useCallback, Component, type ReactNode } from 'react';
 import * as gs from './services/googleSheets';
 
+const LOGO_URL = '/logo.png';
+
+// Placeholder for useData - will be defined later
+function useData() {
+  return {} as any;
+}
+
+// Placeholder components - will be defined later
+function EditExpenseSheetModal(props: any) {
+  return null;
+}
+
+function AddNomenclatureModal(props: any) {
+  return null;
+}
+
+function EditNomenclatureModal(props: any) {
+  return null;
+}
+
 // Компонент экрана ошибки подключения
 function ConnectionErrorScreen({ error, onRetry }: { error: string; onRetry: () => void }) {
   const [newUrl, setNewUrl] = useState('');
@@ -1773,3 +1793,615 @@ function BalancePage({ data }: { data: ReturnType<typeof useData> }) {
       isArray: Array.isArray(a.items)
     })));
   });
+
+  // Функция для расчёта остатка по сотруднику и номенклатуре
+  const calculateBalance = (employeeId: string, nomenclatureId: string): number => {
+    // Считаем приходы (только неархивированные и существующие)
+    let totalArrival = 0;
+    arrivals.forEach(arrival => {
+      // Проверяем, что запись не архивирована и существует в базе
+      if (arrival.employeeId === employeeId && 
+          arrival.archived !== true && 
+          arrival.id) {
+        // Проверяем, что items существует и является массивом
+        let items = arrival.items;
+        
+        // Если items - строка, пытаемся распарсить
+        if (typeof items === 'string') {
+          try {
+            items = JSON.parse(items);
+          } catch (e) {
+            console.warn('Не удалось распарсить items для прихода:', arrival.id, items);
+            items = [];
+          }
+        }
+        
+        if (Array.isArray(items) && items.length > 0) {
+          items.forEach((item: any) => {
+            if (item.nomenclatureId === nomenclatureId) {
+              totalArrival += Number(item.quantity) || 0;
+            }
+          });
+        }
+      }
+    });
+
+    // Считаем расходы (только неархивированные и существующие)
+    let totalExpense = 0;
+    expenseSheets.forEach(sheet => {
+      if (sheet.employeeId === employeeId && 
+          sheet.archived !== true && 
+          sheet.id) {
+        // Проверяем, что items существует и является массивом
+        let items = sheet.items;
+        
+        // Если items - строка, пытаемся распарсить
+        if (typeof items === 'string') {
+          try {
+            items = JSON.parse(items);
+          } catch (e) {
+            console.warn('Не удалось распарсить items для расхода:', sheet.id, items);
+            items = [];
+          }
+        }
+        
+        if (Array.isArray(items) && items.length > 0) {
+          items.forEach((item: any) => {
+            if (item.nomenclatureId === nomenclatureId) {
+              totalExpense += Number(item.quantity) || 0;
+            }
+          });
+        }
+      }
+    });
+
+    return totalArrival - totalExpense;
+  };
+
+  // Функция для расчёта общего количества по номенклатуре
+  const calculateTotalQuantity = (nomenclatureId: string): number => {
+    let total = 0;
+    allEmployees.forEach((emp: gs.Employee) => {
+      total += calculateBalance(emp.id, nomenclatureId);
+    });
+    return total;
+  };
+
+  // Функция для расчёта общей стоимости по сотруднику
+  const calculateEmployeeTotal = (employeeId: string): number => {
+    let total = 0;
+    nomenclature.forEach(item => {
+      const balance = calculateBalance(employeeId, item.id);
+      total += balance * item.currentPrice;
+    });
+    return total;
+  };
+
+  // Функция для расчёта общего итога
+  const calculateGrandTotal = (): number => {
+    let total = 0;
+    allEmployees.forEach((emp: gs.Employee) => {
+      total += calculateEmployeeTotal(emp.id);
+    });
+    return total;
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Блок 1: Шапка */}
+      <div className="bg-white rounded-xl border border-slate-200 p-6">
+        <h2 className="text-2xl font-bold text-slate-800">🧰 Остаток у сотрудника</h2>
+        <p className="text-slate-600 mt-1">Просмотр остатков номенклатуры у сотрудников</p>
+      </div>
+
+      {/* Блок 2: Таблица остатков */}
+      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden max-w-full">
+        <div className="overflow-x-auto overflow-y-auto max-w-full" style={{ maxHeight: 'calc(100vh - 300px)' }}>
+          <table className="border-collapse bg-white" style={{ borderSpacing: 0 }}>
+            <thead className="sticky top-0 z-20">
+              <tr className="bg-slate-100">
+                <th className="px-3 py-2 text-left text-sm font-semibold text-slate-700 border border-slate-300 sticky left-0 bg-slate-100 z-30" style={{ minWidth: '220px', boxShadow: 'inset -1px 0 0 0 #cbd5e1, 2px 0 4px -1px rgba(0,0,0,0.2)' }}>Номенклатура</th>
+                <th className="px-3 py-2 text-left text-sm font-semibold text-slate-700 border border-slate-300 sticky left-[220px] bg-slate-100 z-31" style={{ minWidth: '100px', boxShadow: 'inset -1px 0 0 0 #cbd5e1, inset 1px 0 0 0 #cbd5e1, 2px 0 4px -1px rgba(0,0,0,0.2)' }}>Ед. изм.</th>
+                <th className="px-3 py-2 text-left text-sm font-semibold text-slate-700 border border-slate-300 sticky left-[320px] bg-slate-100 z-32" style={{ minWidth: '110px', boxShadow: 'inset -1px 0 0 0 #cbd5e1, inset 1px 0 0 0 #cbd5e1, 2px 0 4px -1px rgba(0,0,0,0.2)' }}>Цена за ед.</th>
+                {allEmployees.map((emp: gs.Employee) => {
+                  const parts = emp.fullName.trim().split(' ');
+                  const lastName = parts[0] || '';
+                  const initials = parts.slice(1).map((p: string) => p[0] + '.').join('');
+                  const formattedName = initials ? `${lastName} ${initials}` : lastName;
+                  return (
+                    <th key={emp.id} className="px-3 py-2 text-left text-sm font-semibold text-slate-700 border border-slate-300 bg-slate-100" style={{ minWidth: '130px' }}>
+                      {formattedName}
+                    </th>
+                  );
+                })}
+                <th className="px-3 py-2 text-left text-sm font-semibold text-slate-700 border border-slate-300 bg-slate-200 sticky right-[130px] z-31" style={{ minWidth: '110px', boxShadow: 'inset 1px 0 0 0 #cbd5e1, inset -1px 0 0 0 #cbd5e1, -2px 0 4px -1px rgba(0,0,0,0.2)' }}>Итого кол-во</th>
+                <th className="px-3 py-2 text-left text-sm font-semibold text-slate-700 border border-slate-300 bg-slate-200 sticky right-0 z-32" style={{ minWidth: '130px', boxShadow: 'inset 1px 0 0 0 #cbd5e1, -2px 0 4px -1px rgba(0,0,0,0.2)' }}>Итого сумма</th>
+              </tr>
+            </thead>
+            <tbody>
+              {nomenclature.length === 0 ? (
+                <tr>
+                  <td colSpan={3 + allEmployees.length + 2} className="px-3 py-8 text-center text-sm text-slate-400 border border-slate-300">
+                    Нет данных
+                  </td>
+                </tr>
+              ) : (
+                <>
+                  {nomenclature.map((item) => {
+                    const totalQty = calculateTotalQuantity(item.id);
+                    const totalSum = totalQty * item.currentPrice;
+
+                    return (
+                      <tr key={item.id} className="group bg-white hover:bg-blue-50 transition-colors">
+                        <td className="px-3 py-2 text-sm text-slate-800 border border-slate-300 sticky left-0 bg-white group-hover:bg-blue-50 z-10" style={{ minWidth: '220px', boxShadow: 'inset -1px 0 0 0 #cbd5e1, 2px 0 4px -1px rgba(0,0,0,0.2)' }}>{item.name}</td>
+                        <td className="px-3 py-2 text-sm text-slate-700 border border-slate-300 sticky left-[220px] bg-white group-hover:bg-blue-50 z-11" style={{ minWidth: '100px', boxShadow: 'inset -1px 0 0 0 #cbd5e1, inset 1px 0 0 0 #cbd5e1, 2px 0 4px -1px rgba(0,0,0,0.2)' }}>{item.unit}</td>
+                        <td className="px-3 py-2 text-sm text-left text-slate-700 border border-slate-300 sticky left-[320px] bg-white group-hover:bg-blue-50 z-12" style={{ minWidth: '110px', boxShadow: 'inset -1px 0 0 0 #cbd5e1, inset 1px 0 0 0 #cbd5e1, 2px 0 4px -1px rgba(0,0,0,0.2)' }}>{item.currentPrice.toLocaleString('ru-RU')} ₽</td>
+                        {allEmployees.map((emp: gs.Employee) => {
+                          const balance = calculateBalance(emp.id, item.id);
+                          return (
+                            <td key={emp.id} className={`px-3 py-2 text-sm text-left border border-slate-300 group-hover:bg-blue-50 ${balance > 0 ? 'text-slate-800 font-medium bg-white' : balance < 0 ? 'text-red-600 font-medium bg-white' : 'text-slate-400 bg-white'}`} style={{ minWidth: '130px' }}>
+                              {balance}
+                            </td>
+                          );
+                        })}
+                        <td className={`px-3 py-2 text-sm text-left font-semibold border border-slate-300 bg-slate-50 group-hover:bg-blue-100 sticky right-[130px] z-11 ${totalQty > 0 ? 'text-slate-800' : totalQty < 0 ? 'text-red-600' : 'text-slate-400'}`} style={{ minWidth: '110px', boxShadow: 'inset 1px 0 0 0 #cbd5e1, inset -1px 0 0 0 #cbd5e1, -2px 0 4px -1px rgba(0,0,0,0.2)' }}>
+                          {totalQty}
+                        </td>
+                        <td className={`px-3 py-2 text-sm text-left font-semibold border border-slate-300 bg-slate-50 group-hover:bg-blue-100 sticky right-0 z-12 ${totalSum > 0 ? 'text-emerald-600' : totalSum < 0 ? 'text-red-600' : 'text-slate-400'}`} style={{ minWidth: '130px', boxShadow: 'inset 1px 0 0 0 #cbd5e1, -2px 0 4px -1px rgba(0,0,0,0.2)' }}>
+                          {totalSum.toLocaleString('ru-RU')} ₽
+                        </td>
+                      </tr>
+                    );
+                  })}
+
+                  {/* Итоговая строка */}
+                  <tr className="bg-slate-100 font-bold">
+                    <td className="px-3 py-3 text-sm text-slate-800 border border-slate-300 sticky left-0 bg-slate-100 z-10" style={{ minWidth: '220px', boxShadow: 'inset -1px 0 0 0 #cbd5e1, 2px 0 4px -1px rgba(0,0,0,0.2)' }}>ИТОГО</td>
+                    <td className="px-3 py-3 text-sm text-slate-800 border border-slate-300 sticky left-[220px] bg-slate-100 z-11" style={{ minWidth: '100px', boxShadow: 'inset -1px 0 0 0 #cbd5e1, inset 1px 0 0 0 #cbd5e1, 2px 0 4px -1px rgba(0,0,0,0.2)' }}>—</td>
+                    <td className="px-3 py-3 text-sm text-slate-800 border border-slate-300 sticky left-[320px] bg-slate-100 z-12" style={{ minWidth: '110px', boxShadow: 'inset -1px 0 0 0 #cbd5e1, inset 1px 0 0 0 #cbd5e1, 2px 0 4px -1px rgba(0,0,0,0.2)' }}>—</td>
+                    {allEmployees.map((emp: gs.Employee) => {
+                      const empTotal = calculateEmployeeTotal(emp.id);
+                      return (
+                        <td key={emp.id} className={`px-3 py-3 text-sm text-left border border-slate-300 bg-slate-100 ${empTotal > 0 ? 'text-emerald-600' : empTotal < 0 ? 'text-red-600' : 'text-slate-400'}`} style={{ minWidth: '130px' }}>
+                          {empTotal.toLocaleString('ru-RU')} ₽
+                        </td>
+                      );
+                    })}
+                    <td className="px-3 py-3 text-sm text-left border border-slate-300 bg-slate-200 text-slate-800 sticky right-[130px] z-11" style={{ minWidth: '110px', boxShadow: 'inset 1px 0 0 0 #cbd5e1, inset -1px 0 0 0 #cbd5e1, -2px 0 4px -1px rgba(0,0,0,0.2)' }}>
+                      {nomenclature.reduce((sum, item) => sum + calculateTotalQuantity(item.id), 0)}
+                    </td>
+                    <td className={`px-3 py-3 text-sm text-left border border-slate-300 bg-slate-200 sticky right-0 z-12 ${calculateGrandTotal() > 0 ? 'text-emerald-600' : calculateGrandTotal() < 0 ? 'text-red-600' : 'text-slate-400'}`} style={{ minWidth: '130px', boxShadow: 'inset 1px 0 0 0 #cbd5e1, -2px 0 4px -1px rgba(0,0,0,0.2)' }}>
+                      {calculateGrandTotal().toLocaleString('ru-RU')} ₽
+                    </td>
+                  </tr>
+                </>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============ МОДАЛЬНОЕ ОКНО ПРОСМОТРА КАРТЫ ПРИХОДА ============
+function ViewArrivalModal({
+  arrival,
+  employees,
+  nomenclature,
+  onClose
+}: {
+  arrival: gs.Arrival;
+  employees: gs.Employee[];
+  nomenclature: gs.Nomenclature[];
+  onClose: () => void;
+}) {
+  const items = (arrival as any).items || [];
+
+  return (
+    <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl border border-slate-200 w-full max-w-3xl max-h-[90vh] flex flex-col shadow-2xl">
+        <div className="p-6 border-b border-slate-200 flex items-center justify-between">
+          <h3 className="text-lg font-bold text-slate-800">📋 Карта прихода</h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-2xl">×</button>
+        </div>
+        
+        <div className="flex-1 overflow-y-auto p-6 space-y-6">
+          {/* Основная информация */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="text-sm text-slate-600 mb-1 block">Дата</label>
+              <div className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-800">
+                {new Date(arrival.date).toLocaleDateString('ru-RU')}
+              </div>
+            </div>
+            <div>
+              <label className="text-sm text-slate-600 mb-1 block">Сотрудник</label>
+              <div className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-800">
+                {(() => {
+                  const employee = employees.find(e => e.id === arrival.employeeId);
+                  return employee ? employee.fullName : (arrival.employeeName || arrival.employeeId);
+                })()}
+              </div>
+            </div>
+          </div>
+
+          {/* Позиции */}
+          {items.length > 0 && (
+            <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
+              <div className="p-4 bg-slate-50 border-b border-slate-200">
+                <h4 className="text-sm font-semibold text-slate-700">Позиции прихода</h4>
+              </div>
+              <table className="w-full table-fixed">
+                <colgroup>
+                  <col style={{ width: '50%' }} />
+                  <col style={{ width: '120px' }} />
+                  <col style={{ width: '150px' }} />
+                  <col style={{ width: '150px' }} />
+                </colgroup>
+                <thead>
+                  <tr className="border-b border-slate-200 bg-slate-50">
+                    <th className="px-4 py-2 text-left text-xs font-medium text-slate-600 uppercase">Наименование</th>
+                    <th className="px-4 py-2 text-center text-xs font-medium text-slate-600 uppercase">Кол-во</th>
+                    <th className="px-4 py-2 text-right text-xs font-medium text-slate-600 uppercase">Цена за ед.</th>
+                    <th className="px-4 py-2 text-right text-xs font-medium text-slate-600 uppercase">Сумма</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {items.map((item: any) => {
+                    const nom = nomenclature.find(n => n.id === item.nomenclatureId);
+                    return (
+                      <tr key={item.nomenclatureId} className="border-b border-slate-100">
+                        <td className="px-4 py-3 text-sm text-slate-800 truncate">{nom?.name}</td>
+                        <td className="px-4 py-3 text-center text-sm text-slate-800">{item.quantity}</td>
+                        <td className="px-4 py-3 text-right text-sm text-slate-700">{item.price.toLocaleString('ru-RU')} ₽</td>
+                        <td className="px-4 py-3 text-right text-sm font-semibold text-emerald-600">{item.total.toLocaleString('ru-RU')} ₽</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+                <tfoot>
+                  <tr className="bg-slate-50 font-bold">
+                    <td colSpan={3} className="px-4 py-3 text-right text-sm text-slate-800">ИТОГО:</td>
+                    <td className="px-4 py-3 text-right text-lg text-emerald-600">{arrival.amount.toLocaleString('ru-RU')} ₽</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
+
+          {items.length === 0 && (
+            <div className="text-center text-slate-500 py-8">
+              <p>Нет данных о позициях</p>
+            </div>
+          )}
+        </div>
+
+        <div className="p-6 border-t border-slate-200 flex justify-end">
+          <button onClick={onClose} className="px-4 py-2 bg-slate-600 hover:bg-slate-500 rounded-lg text-white font-medium">
+            Закрыть
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============ НОМЕНКЛАТУРА ============
+function NomenclaturePage({ data }: { data: ReturnType<typeof useData> }) {
+  const { nomenclature, setNomenclature } = data;
+  const [search, setSearch] = useState('');
+  const [catFilter, setCatFilter] = useState('all');
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [editingItem, setEditingItem] = useState<gs.Nomenclature | null>(null);
+  const [viewingItem, setViewingItem] = useState<gs.Nomenclature | null>(null);
+
+  const handleEdit = (item: gs.Nomenclature) => {
+    setEditingItem(item);
+  };
+
+  const handleDelete = async (id: string) => {
+    if (confirm('Удалить эту позицию из номенклатуры?')) {
+      // Удаляем из локального состояния
+      setNomenclature(nomenclature.filter(n => n.id !== id));
+      
+      // Отправляем в Google Sheets в фоне
+      gs.deleteNomenclature(id).catch((err: Error) => {
+        console.error('Ошибка удаления номенклатуры:', err);
+        alert('Ошибка при удалении. Попробуйте ещё раз.');
+      });
+    }
+  };
+
+  const searchLower = String(search || '').toLowerCase().trim();
+  const filtered = nomenclature.filter(n => {
+    const name = String(n.name ?? '').toLowerCase();
+    const matchSearch = !searchLower || name.includes(searchLower);
+    const matchCat = catFilter === 'all' || n.category === catFilter;
+    return matchSearch && matchCat;
+  });
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-2xl font-bold text-slate-800">Номенклатура</h2>
+        <p className="text-slate-500 text-sm mt-1">Всего позиций: {nomenclature.length}</p>
+      </div>
+
+      <div className="grid grid-cols-4 gap-3">
+        <div className="bg-white rounded-lg p-4 border border-slate-200 shadow-sm">
+          <div className="text-2xl font-bold text-red-600">{nomenclature.filter(n => n.category === 'ЛС ПКУ').length}</div>
+          <div className="text-xs text-slate-500">ЛС ПКУ</div>
+        </div>
+        <div className="bg-white rounded-lg p-4 border border-slate-200 shadow-sm">
+          <div className="text-2xl font-bold text-green-600">{nomenclature.filter(n => n.category === 'ЛС').length}</div>
+          <div className="text-xs text-slate-500">ЛС</div>
+        </div>
+        <div className="bg-white rounded-lg p-4 border border-slate-200 shadow-sm">
+          <div className="text-2xl font-bold text-blue-600">{nomenclature.filter(n => n.category === 'Расходный материал').length}</div>
+          <div className="text-xs text-slate-500 uppercase">Расходных материалов</div>
+        </div>
+        <div className="bg-white rounded-lg p-4 border border-slate-200 shadow-sm">
+          <div className="text-2xl font-bold text-purple-600">{nomenclature.filter(n => n.category === 'Оборудование').length}</div>
+          <div className="text-xs text-slate-500 uppercase">Оборудования</div>
+        </div>
+      </div>
+
+      <div className="flex gap-3">
+        <input type="text" placeholder="Поиск..." value={search} onChange={e => setSearch(e.target.value)}
+          className="flex-1 px-4 py-2 bg-white border border-slate-200 rounded-lg text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500 shadow-sm" />
+        <select value={catFilter} onChange={e => setCatFilter(e.target.value)}
+          className="px-4 py-2 bg-white border border-slate-200 rounded-lg text-slate-800 focus:outline-none focus:border-blue-500 shadow-sm">
+          <option value="all">Все категории</option>
+          <option value="ЛС ПКУ">💉 ЛС ПКУ</option>
+          <option value="ЛС">💊 ЛС</option>
+          <option value="Расходный материал">🩹 Расходных материалов</option>
+          <option value="Оборудование">🩺 Оборудования</option>
+        </select>
+        <button onClick={() => setShowAddModal(true)} className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg shadow-sm transition-colors">
+          + Добавить
+        </button>
+      </div>
+
+      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+        <table className="w-full">
+          <thead>
+            <tr className="border-b border-slate-200 text-left bg-slate-50">
+              <th className="px-5 py-3 text-xs font-medium text-slate-600 uppercase">Название</th>
+              <th className="px-5 py-3 text-xs font-medium text-slate-600 uppercase">Категория</th>
+              <th className="px-5 py-3 text-xs font-medium text-slate-600 uppercase">Ед. изм.</th>
+              <th className="px-5 py-3 text-xs font-medium text-slate-600 uppercase">Производитель</th>
+              <th className="px-5 py-3 text-xs font-medium text-slate-600 uppercase">Кол-во в упаковке</th>
+              <th className="px-5 py-3 text-xs font-medium text-slate-600 uppercase">Цена за упаковку (₽)</th>
+              <th className="px-5 py-3 text-xs font-medium text-slate-600 uppercase">Цена за единицу (₽)</th>
+              <th className="px-5 py-3 text-xs font-medium text-slate-600 uppercase">Действия</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map(item => (
+              <tr key={item.id} className="border-b border-slate-100 hover:bg-slate-50">
+                <td className="px-5 py-3">
+                  <div 
+                    className="text-sm font-medium text-blue-600 hover:text-blue-800 cursor-pointer hover:underline"
+                    onClick={() => setViewingItem(item)}
+                  >
+                    {item.name}
+                  </div>
+                </td>
+                <td className="px-5 py-3">
+                  <span className={`px-2 py-1 rounded-full text-xs ${
+                    item.category === 'ЛС ПКУ' ? 'bg-red-100 text-red-700' :
+                    item.category === 'ЛС' ? 'bg-green-100 text-green-700' :
+                    item.category === 'Расходный материал' ? 'bg-blue-100 text-blue-700' :
+                    item.category === 'Оборудование' ? 'bg-purple-100 text-purple-700' :
+                    'bg-slate-100 text-slate-700'
+                  }`}>{item.category}</span>
+                </td>
+                <td className="px-5 py-3 text-sm text-slate-700">{item.unit}</td>
+                <td className="px-5 py-3 text-sm text-slate-700">{item.manufacturer || '-'}</td>
+                <td className="px-5 py-3 text-sm font-semibold text-slate-800">{item.packageQuantity || 1}</td>
+                <td className="px-5 py-3 text-sm font-semibold text-emerald-600">
+                  {(item.currentPrice * (item.packageQuantity || 1)).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₽
+                </td>
+                <td className="px-5 py-3 text-sm font-semibold text-blue-600">
+                  {item.currentPrice.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₽
+                </td>
+                <td className="px-5 py-3">
+                  <div className="flex items-center gap-2">
+                    <button 
+                      onClick={() => handleEdit(item)}
+                      className="text-blue-600 hover:text-blue-800 text-lg"
+                      title="✍️ Редактировать"
+                    >
+                      ✍️
+                    </button>
+                    <button 
+                      onClick={() => handleDelete(item.id)}
+                      className="text-red-600 hover:text-red-800 text-lg"
+                      title="❌ Удалить"
+                    >
+                      ❌
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {filtered.length === 0 && (
+          <div className="p-8 text-center text-slate-500">
+            <p>Номенклатура пуста</p>
+          </div>
+        )}
+      </div>
+
+      {showAddModal && (
+        <AddNomenclatureModal
+          onClose={() => setShowAddModal(false)}
+          onAdd={async (item: gs.Nomenclature) => {
+            setShowAddModal(false);
+            setNomenclature([...nomenclature, item]);
+            gs.addNomenclature(item).catch(err => {
+              console.error('Ошибка добавления номенклатуры:', err);
+              alert('Ошибка при добавлении номенклатуры. Попробуйте ещё раз.');
+            });
+          }}
+        />
+      )}
+
+      {editingItem && (
+        <EditNomenclatureModal
+          item={editingItem}
+          onClose={() => setEditingItem(null)}
+          onSave={async (updatedItem: gs.Nomenclature) => {
+            setEditingItem(null);
+            setNomenclature(nomenclature.map(n => n.id === updatedItem.id ? updatedItem : n));
+            gs.updateNomenclature(updatedItem.id, updatedItem).catch((err: Error) => {
+              console.error('Ошибка обновления номенклатуры:', err);
+              alert('Ошибка при сохранении изменений. Попробуйте ещё раз.');
+            });
+          }}
+        />
+      )}
+
+      {viewingItem && (
+        <ViewNomenclatureCardModal
+          item={viewingItem}
+          onClose={() => setViewingItem(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+// ============ МОДАЛЬНОЕ ОКНО ПРОСМОТРА КАРТОЧКИ НОМЕНКЛАТУРЫ ============
+function ViewNomenclatureCardModal({
+  item,
+  onClose
+}: {
+  item: gs.Nomenclature;
+  onClose: () => void;
+}) {
+  const [priceHistory, setPriceHistory] = useState<gs.PriceHistory[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+
+  useEffect(() => {
+    const loadPriceHistory = async () => {
+      setLoadingHistory(true);
+      try {
+        const history = await gs.getPriceHistory(item.id);
+        setPriceHistory(history);
+      } catch (err) {
+        console.error('Ошибка загрузки истории цен:', err);
+      } finally {
+        setLoadingHistory(false);
+      }
+    };
+    loadPriceHistory();
+  }, [item.id]);
+
+  return (
+    <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl border border-slate-200 w-full max-w-2xl shadow-2xl max-h-[90vh] overflow-y-auto">
+        <div className="p-6 border-b border-slate-200 flex items-center justify-between sticky top-0 bg-white z-10">
+          <h3 className="text-lg font-bold text-slate-800">📋 Карточка позиции</h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-2xl">×</button>
+        </div>
+        <div className="p-6 space-y-4">
+              <div>
+                <label className="text-sm text-slate-600 mb-1 block">Наименование</label>
+                <div className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-800 font-semibold">
+                  {item.name}
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-sm text-slate-600 mb-1 block">Категория</label>
+                  <div className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg">
+                    <span className={`px-2 py-1 rounded-full text-xs ${
+                      item.category === 'ЛС ПКУ' ? 'bg-red-100 text-red-700' :
+                      item.category === 'ЛС' ? 'bg-green-100 text-green-700' :
+                      item.category === 'Расходный материал' ? 'bg-blue-100 text-blue-700' :
+                      item.category === 'Оборудование' ? 'bg-purple-100 text-purple-700' :
+                      'bg-slate-100 text-slate-700'
+                    }`}>{item.category}</span>
+                  </div>
+                </div>
+                <div>
+                  <label className="text-sm text-slate-600 mb-1 block">Единица измерения</label>
+                  <div className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-800">
+                    {item.unit}
+                  </div>
+                </div>
+              </div>
+              <div>
+                <label className="text-sm text-slate-600 mb-1 block">Производитель</label>
+                <div className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-800">
+                  {item.manufacturer || 'Не указан'}
+                </div>
+              </div>
+              <div>
+                <label className="text-sm text-slate-600 mb-1 block">Количество в упаковке</label>
+                <div className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-800 font-semibold">
+                  {item.packageQuantity || 1}
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-sm text-slate-600 mb-1 block">Цена за упаковку</label>
+                  <div className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-emerald-600 font-semibold">
+                    {(item.currentPrice * (item.packageQuantity || 1)).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₽
+                  </div>
+                </div>
+                <div>
+                  <label className="text-sm text-slate-600 mb-1 block">Цена за единицу</label>
+                  <div className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-blue-600 font-semibold">
+                    {item.currentPrice.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₽
+                  </div>
+                </div>
+              </div>
+
+              {/* История изменений цен */}
+              <div className="mt-6">
+                <h4 className="text-sm font-semibold text-slate-700 mb-3">📊 Изменение цены</h4>
+                {loadingHistory ? (
+                  <div className="text-center py-4 text-slate-500">Загрузка истории...</div>
+                ) : priceHistory.length === 0 ? (
+                  <div className="text-center py-4 text-slate-400 text-sm">История изменений отсутствует</div>
+                ) : (
+                  <div className="space-y-2 max-h-60 overflow-y-auto">
+                    {priceHistory.map((record, index) => (
+                      <div key={record.id || index} className="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-lg">
+                        <div className="flex-1">
+                          <div className="text-sm font-semibold text-slate-800">
+                            {record.price.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₽
+                          </div>
+                          <div className="text-xs text-slate-500">
+                            {new Date(record.date).toLocaleDateString('ru-RU')} • {record.changedBy}
+                          </div>
+                        </div>
+                        {index === 0 && (
+                          <span className="px-2 py-1 bg-emerald-100 text-emerald-700 text-xs rounded-full font-semibold">
+                            Текущая
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="p-6 border-t border-slate-200 flex justify-end">
+              <button onClick={onClose} className="px-4 py-2 bg-slate-600 hover:bg-slate-500 rounded-lg text-white font-medium">
+                Закрыть
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+}
+
+// Default export
+export default function App() {
+  return <div>App component - to be implemented</div>;
+}
