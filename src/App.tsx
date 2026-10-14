@@ -4061,7 +4061,7 @@ export default function App() {
           <img src={LOGO_URL} alt="АлкоСпас" className="w-10 h-10 rounded-lg object-contain shrink-0" />
           {sidebarOpen && (
             <div className="overflow-hidden">
-              <h1 className="text-sm font-bold text-slate-800 whitespace-nowrap">АлкоСпас</h1>
+              <h1 className="text-sm font-bold whitespace-nowrap"><span className="text-blue-600">Алко</span><span className="text-red-600">Спас</span></h1>
               <p className="text-xs text-slate-500 leading-tight">Система медицинского учета</p>
               <p className="text-xs text-emerald-600 font-semibold">(v. 0.5.2)</p>
             </div>
