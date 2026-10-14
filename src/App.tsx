@@ -1195,3 +1195,292 @@ function ExpenseSheetView({
     </div>
   );
 }
+
+// По умолчанию показываем предыдущий месяц
+    const now = new Date();
+    const previousMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    return `${previousMonth.getFullYear()}-${String(previousMonth.getMonth() + 1).padStart(2, '0')}`;
+  });
+
+  // Фильтрация по месяцу (для отображения)
+  const filteredSheets = expenseSheets.filter(s => s.month === selectedMonth && !s.archived);
+
+  // Все листы за месяц (включая архивированные) для расчёта статистики
+  const allSheetsForMonth = expenseSheets.filter(s => s.month === selectedMonth);
+
+  // Расчёт статистики за выбранный месяц (включая архивированные)
+  const totalExpense = allSheetsForMonth.reduce((sum, s) => sum + s.totalAmount, 0);
+  const sheetsCount = allSheetsForMonth.length;
+  const exceededLimit = allSheetsForMonth.filter(s => {
+    if (s.therapyCost === 0) return false;
+    const limit = (s.totalAmount * 100) / s.therapyCost;
+    return limit > 5 || limit < 2.5; // Лимит вне диапазона 2.5% - 5%
+  }).length;
+
+  // Генерация списка месяцев
+  const generateMonthOptions = () => {
+    const months = [];
+    const current = new Date();
+    for (let i = 0; i < 12; i++) {
+      const date = new Date(current.getFullYear(), current.getMonth() - i, 1);
+      const monthStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+      const monthName = date.toLocaleString('ru-RU', { month: 'long', year: 'numeric' });
+      months.push({ value: monthStr, label: monthName });
+    }
+    return months;
+  };
+
+  // Архивирование листа расхода
+  const handleArchiveSheet = async (id: string) => {
+    if (!confirm('Отправить лист расхода в архив?')) return;
+    setExpenseSheets(expenseSheets.map(s => s.id === id ? { ...s, archived: true } : s));
+    try {
+      await gs.archiveExpenseSheet(id);
+    } catch (err) {
+      console.error('Ошибка архивирования:', err);
+      alert('Ошибка при архивировании. Попробуйте ещё раз.');
+    }
+  };
+
+  // Редактирование листа расхода
+  const handleEditSheet = (sheet: gs.ExpenseSheet) => {
+    setEditingSheet(sheet);
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex justify-between items-start">
+        <div>
+          <h2 className="text-2xl font-bold text-slate-800">📤 Расход у сотрудника</h2>
+          <p className="text-slate-500 text-sm mt-1">Листы расхода</p>
+        </div>
+        <select
+          value={selectedMonth}
+          onChange={(e) => setSelectedMonth(e.target.value)}
+          className="px-4 py-2 bg-white border border-slate-300 rounded-lg text-sm text-slate-800 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+        >
+          {generateMonthOptions().map(month => (
+            <option key={month.value} value={month.value}>
+              {month.label}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {/* Карточки статистики */}
+      <div className="grid grid-cols-3 gap-4">
+        <div className="bg-white rounded-xl p-6 border border-slate-200 shadow-sm flex flex-col justify-between min-h-[140px]">
+          <div className="text-xs text-slate-500 uppercase mb-2">ОБЩАЯ СУММА РАСХОДА ЗА МЕСЯЦ</div>
+          <div className="text-2xl font-bold text-emerald-600 min-h-[40px] flex items-center">{totalExpense.toLocaleString('ru-RU')} ₽</div>
+          <div className="text-xs text-slate-500 mt-2 uppercase">{new Date(selectedMonth + '-01').toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' })}</div>
+        </div>
+        <div className="bg-white rounded-xl p-6 border border-slate-200 shadow-sm flex flex-col justify-between min-h-[140px]">
+          <div className="text-xs text-slate-500 uppercase mb-2">ЛИСТОВ РАСХОДА ЗА МЕСЯЦ</div>
+          <div className="text-2xl font-bold text-blue-600 min-h-[40px] flex items-center">{sheetsCount}</div>
+          <div className="text-xs text-slate-500 mt-2 uppercase">{new Date(selectedMonth + '-01').toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' })}</div>
+        </div>
+        <div className="bg-white rounded-xl p-6 border border-slate-200 shadow-sm flex flex-col justify-between min-h-[140px]">
+          <div className="text-xs text-slate-500 uppercase mb-2">ЛИСТОВ С ОТКЛОНЕНИЕМ ОТ ЛИМИТА</div>
+          <div className="text-2xl font-bold text-red-600 min-h-[40px] flex items-center">{exceededLimit}</div>
+          <div className="text-xs text-slate-500 mt-2 uppercase">{new Date(selectedMonth + '-01').toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' })}</div>
+        </div>
+      </div>
+
+      {/* Листы расхода */}
+      <div className="space-y-6">
+        {filteredSheets.length === 0 ? (
+          <div className="bg-white rounded-xl p-8 text-center text-slate-500 border border-slate-200">
+            <p>Нет листов расхода за выбранный месяц</p>
+          </div>
+        ) : (
+          filteredSheets.map(sheet => (
+            <ExpenseSheetView 
+              key={sheet.id} 
+              sheet={sheet} 
+              employees={employees}
+              onArchive={handleArchiveSheet}
+              onEdit={handleEditSheet}
+            />
+          ))
+        )}
+      </div>
+
+      {/* Модальное окно редактирования */}
+      {editingSheet && (
+        <EditExpenseSheetModal
+          sheet={editingSheet}
+          employees={employees}
+          nomenclature={nomenclature}
+          onClose={() => setEditingSheet(null)}
+          onSave={(updatedSheet) => {
+            setExpenseSheets(expenseSheets.map(s => s.id === updatedSheet.id ? updatedSheet : s));
+            gs.updateExpenseSheet(updatedSheet.id, updatedSheet).catch(err => {
+              console.error('Ошибка обновления листа расхода:', err);
+              alert('Ошибка при обновлении листа расхода. Попробуйте ещё раз.');
+            });
+            setEditingSheet(null);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ============ ОСТАТОК У СОТРУДНИКА ============
+function BalancePage({ data }: {  ReturnType<typeof useData> }) {
+  const { employees, nomenclature, arrivals, expenseSheets } = data;
+  
+  // Получаем всех сотрудников, кроме уволенных (включая Неактивен, Отпуск и т.д.)
+  // Убираем дубликаты по ФИО — оставляем только первую запись с таким ФИО
+  const seenNames = new Set<string>();
+  const allEmployees = employees.filter(e => {
+    if (e.status === 'Уволен') return false;
+    const fullName = String(e.fullName ?? '').trim().toLowerCase();
+    if (seenNames.has(fullName)) {
+      return false;
+    }
+    seenNames.add(fullName);
+    return true;
+  });
+  
+  // Отладка: выводим всех сотрудников и их статусы
+  console.log('👥 ВСЕ СОТРУДНИКИ (включая уволенных):', employees.map(e => ({
+    id: e.id,
+    fullName: e.fullName,
+    status: e.status,
+    blocked: e.blocked,
+    shiftOpen: e.shiftOpen
+  })));
+  
+  console.log('✅ СОТРУДНИКИ ДЛЯ ОСТАТКОВ (без дубликатов и уволенных):', allEmployees.map(e => ({
+    id: e.id,
+    fullName: e.fullName,
+    status: e.status
+  })));
+  
+  // Проверяем, есть ли Григорьева в списке
+  const grigorieva = employees.find(e => e.fullName.includes('Григорьева'));
+  if (grigorieva) {
+    console.log('🔍 ГРИГОРЬЕВА найдена:', {
+      id: grigorieva.id,
+      fullName: grigorieva.fullName,
+      status: grigorieva.status,
+      isInAllEmployees: allEmployees.some(e => e.id === grigorieva.id)
+    });
+    
+    // Проверяем приходы Григорьевой
+    const grigorievaArrivals = arrivals.filter(a => a.employeeId === grigorieva.id);
+    console.log('📥 Приходы Григорьевой:', grigorievaArrivals.length, grigorievaArrivals.map(a => ({
+      id: a.id,
+      employeeId: a.employeeId,
+      amount: a.amount,
+      archived: a.archived,
+      itemsCount: Array.isArray(a.items) ? a.items.length : 'N/A'
+    })));
+  } else {
+    console.warn('⚠️ ГРИГОРЬЕВА НЕ НАЙДЕНА в списке сотрудников!');
+  }
+
+  // Отладочная информация - выводим все приходы
+  console.log('📊 ВСЕ ПРИХОДЫ:', arrivals.map(a => ({
+    id: a.id,
+    employeeId: a.employeeId,
+    employeeName: a.employeeName,
+    amount: a.amount,
+    archived: a.archived,
+    items: a.items,
+    itemsType: typeof a.items,
+    isArray: Array.isArray(a.items),
+    itemsLength: Array.isArray(a.items) ? a.items.length : 'N/A'
+  })));
+  
+  console.log('👥 ВСЕ СОТРУДНИКИ:', allEmployees.map(e => ({
+    id: e.id,
+    fullName: e.fullName,
+    status: e.status
+  })));
+  
+  // Проверяем приходы для каждого сотрудника
+  allEmployees.forEach((emp: gs.Employee) => {
+    const empArrivals = arrivals.filter(a => a.employeeId === emp.id && a.archived !== true);
+    console.log(`📥 Приходы для ${emp.fullName} (${emp.id}):`, empArrivals.length, empArrivals.map(a => ({
+      id: a.id,
+      amount: a.amount,
+      items: a.items,
+      itemsType: typeof a.items,
+      isArray: Array.isArray(a.items)
+    })));
+  });
+
+  // Функция для расчёта остатка по сотруднику и номенклатуре
+  const calculateBalance = (employeeId: string, nomenclatureId: string): number => {
+    // Считаем приходы (только неархивированные и существующие)
+    let totalArrival = 0;
+    arrivals.forEach(arrival => {
+      // Проверяем, что запись не архивирована и существует в базе
+      if (arrival.employeeId === employeeId && 
+          arrival.archived !== true && 
+          arrival.id) {
+        // Проверяем, что items существует и является массивом
+        let items = arrival.items;
+        
+        // Если items - строка, пытаемся распарсить
+        if (typeof items === 'string') {
+          try {
+            items = JSON.parse(items);
+          } catch (e) {
+            console.warn('Не удалось распарсить items для прихода:', arrival.id, items);
+            items = [];
+          }
+        }
+        
+        if (Array.isArray(items) && items.length > 0) {
+          items.forEach((item: any) => {
+            if (item.nomenclatureId === nomenclatureId) {
+              totalArrival += Number(item.quantity) || 0;
+            }
+          });
+        }
+      }
+    });
+
+    // Считаем расходы (только неархивированные и существующие)
+    let totalExpense = 0;
+    expenseSheets.forEach(sheet => {
+      if (sheet.employeeId === employeeId && 
+          sheet.archived !== true && 
+          sheet.id) {
+        // Проверяем, что items существует и является массивом
+        let items = sheet.items;
+        
+        // Если items - строка, пытаемся распарсить
+        if (typeof items === 'string') {
+          try {
+            items = JSON.parse(items);
+          } catch (e) {
+            console.warn('Не удалось распарсить items для расхода:', sheet.id, items);
+            items = [];
+          }
+        }
+        
+        if (Array.isArray(items) && items.length > 0) {
+          items.forEach((item: any) => {
+            if (item.nomenclatureId === nomenclatureId) {
+              totalExpense += Number(item.quantity) || 0;
+            }
+          });
+        }
+      }
+    });
+
+    return totalArrival - totalExpense;
+  };
+
+  // Функция для расчёта общего количества по номенклатуре
+  const calculateTotalQuantity = (nomenclatureId: string): number => {
+    let total = 0;
+    allEmployees.forEach((emp: gs.Employee) => {
+      total += calculateBalance(emp.id, nomenclatureId);
+    });
+    return total;
+  };
