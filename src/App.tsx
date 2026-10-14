@@ -1,21 +1,12 @@
 import { useState, useEffect, useCallback, Component, type ReactNode } from 'react';
 import * as gs from './services/googleSheets';
 
-const LOGO_URL = '/logo.png';
-
 // Placeholder for useData - will be defined later
 function useData() {
   return {} as any;
 }
 
 // Placeholder components - will be defined later
-function AddNomenclatureModal(props: any) {
-  return null;
-}
-
-function EditNomenclatureModal(props: any) {
-  return null;
-}
 
 // Компонент экрана ошибки подключения
 function ConnectionErrorScreen({ error, onRetry }: { error: string; onRetry: () => void }) {
@@ -3495,6 +3486,378 @@ function EditEmployeeModal({
     </div>
   );
 }
+
+// ============ МОДАЛЬНОЕ ОКНО РЕДАКТИРОВАНИЯ НОМЕНКЛАТУРЫ ============
+function EditNomenclatureModal({ 
+  item,
+  onClose, 
+  onSave 
+}: { 
+  item: gs.Nomenclature;
+  onClose: () => void; 
+  onSave: (item: gs.Nomenclature) => Promise<void> 
+}) {
+  const [form, setForm] = useState({
+    name: item.name,
+    category: item.category,
+    unit: item.unit,
+    manufacturer: item.manufacturer,
+    packageQuantity: item.packageQuantity,
+    pricePerPackage: item.currentPrice * (item.packageQuantity || 1),
+  });
+  const [error, setError] = useState<string | null>(null);
+
+  // Автоматический расчет цены за единицу
+  const pricePerUnit = form.packageQuantity > 0 ? form.pricePerPackage / form.packageQuantity : 0;
+
+  const handleSubmit = async () => {
+    setError(null);
+    
+    if (!form.name.trim()) {
+      setError('Наименование не может быть пустым');
+      return;
+    }
+    
+    // Для категории "Оборудование" цена не обязательна
+    if (form.category !== 'Оборудование' && form.pricePerPackage <= 0) {
+      setError('Цена за упаковку должна быть больше 0');
+      return;
+    }
+    
+    if (form.packageQuantity <= 0) {
+      setError('Количество в упаковке должно быть больше 0');
+      return;
+    }
+    
+    await onSave({
+      ...item,
+      name: form.name.trim(),
+      category: form.category,
+      unit: form.unit,
+      manufacturer: form.manufacturer.trim(),
+      currentPrice: pricePerUnit,
+      packageQuantity: form.packageQuantity,
+    });
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl border border-slate-200 w-full max-w-md shadow-2xl">
+        <div className="p-6 border-b border-slate-200 flex items-center justify-between">
+          <h3 className="text-lg font-bold text-slate-800">✍️ Редактировать номенклатуру</h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-2xl">×</button>
+        </div>
+        <div className="p-6 space-y-4">
+          {error && (
+            <div className="p-4 bg-red-50 border-2 border-red-300 rounded-lg text-sm text-red-700 flex items-start gap-3">
+              <span className="text-xl flex-shrink-0">⚠️</span>
+              <div className="flex-1">
+                <div className="font-semibold mb-1">Ошибка</div>
+                <div>{error}</div>
+              </div>
+            </div>
+          )}
+          <div>
+            <label className="text-sm text-slate-600 mb-1 block">Категория *</label>
+            <select 
+              value={form.category} 
+              onChange={e => setForm({ ...form, category: e.target.value })}
+              className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-slate-800 focus:outline-none focus:border-blue-500"
+            >
+              <option value="ЛС ПКУ">💉 ЛС ПКУ</option>
+              <option value="ЛС">💊 ЛС</option>
+              <option value="Расходный материал">🩹 Расходных материалов</option>
+              <option value="Оборудование">🩺 Оборудования</option>
+            </select>
+          </div>
+          <div>
+            <label className="text-sm text-slate-600 mb-1 block">Наименование *</label>
+            <input 
+              type="text" 
+              value={form.name} 
+              onChange={e => { setForm({ ...form, name: e.target.value }); setError(null); }}
+              placeholder="Введите наименование"
+              className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" 
+            />
+          </div>
+          <div>
+            <label className="text-sm text-slate-600 mb-1 block">Единица измерения</label>
+            <select 
+              value={form.unit} 
+              onChange={e => setForm({ ...form, unit: e.target.value })}
+              className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-slate-800 focus:outline-none focus:border-blue-500"
+            >
+              <option value="Ампулы">Ампулы</option>
+              <option value="Таблетки">Таблетки</option>
+              <option value="Флаконы">Флаконы</option>
+              <option value="Штуки">Штуки</option>
+              <option value="Упаковки">Упаковки</option>
+            </select>
+          </div>
+          <div>
+            <label className="text-sm text-slate-600 mb-1 block">Производитель</label>
+            <input 
+              type="text" 
+              value={form.manufacturer} 
+              onChange={e => setForm({ ...form, manufacturer: e.target.value })}
+              placeholder="Введите производителя"
+              className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" 
+            />
+          </div>
+          <div>
+            <label className="text-sm text-slate-600 mb-1 block">Количество в упаковке *</label>
+            <input 
+              type="number" 
+              value={form.packageQuantity || ''} 
+              onChange={e => { setForm({ ...form, packageQuantity: parseInt(e.target.value) || 0 }); setError(null); }}
+              placeholder="1"
+              min="1"
+              step="1"
+              className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" 
+            />
+          </div>
+          <div>
+            <label className="text-sm text-slate-600 mb-1 block">Цена за упаковку (₽) *</label>
+            <input 
+              type="number" 
+              value={form.pricePerPackage || ''} 
+              onChange={e => { setForm({ ...form, pricePerPackage: parseFloat(e.target.value) || 0 }); setError(null); }}
+              placeholder="0"
+              min="0"
+              step="0.01"
+              className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" 
+            />
+          </div>
+          <div>
+            <label className="text-sm text-slate-600 mb-1 block">Цена за единицу (₽)</label>
+            <div className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-600 font-semibold">
+              {pricePerUnit.toFixed(2)} ₽
+            </div>
+            <p className="text-xs text-slate-400 mt-1">Рассчитывается автоматически: цена за упаковку ÷ количество</p>
+          </div>
+        </div>
+        <div className="p-6 border-t border-slate-200 flex justify-end gap-3">
+          <button onClick={onClose} className="px-4 py-2 rounded-lg text-slate-600 hover:bg-slate-100">Отмена</button>
+          <button 
+            onClick={handleSubmit} 
+            disabled={!form.name || (form.category !== 'Оборудование' && form.pricePerPackage <= 0) || form.packageQuantity <= 0}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-300 rounded-lg text-white font-medium"
+          >
+            💾 Сохранить
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============ МОДАЛЬНОЕ ОКНО ДОБАВЛЕНИЯ НОМЕНКЛАТУРЫ ============
+function AddNomenclatureModal({ 
+  onClose, 
+  onAdd 
+}: { 
+  onClose: () => void; 
+  onAdd: (item: gs.Nomenclature) => Promise<void> 
+}) {
+  const [form, setForm] = useState({
+    name: '',
+    category: 'ЛС ПКУ',
+    unit: 'Штуки',
+    manufacturer: '',
+    packageQuantity: 1,
+    pricePerPackage: 0,
+  });
+  const [error, setError] = useState<string | null>(null);
+
+  // Автоматический расчет цены за единицу
+  const pricePerUnit = form.packageQuantity > 0 ? form.pricePerPackage / form.packageQuantity : 0;
+
+  const handleSubmit = async () => {
+    setError(null);
+    
+    if (!form.name.trim()) {
+      setError('Наименование не может быть пустым');
+      return;
+    }
+    
+    // Для категории "Оборудование" цена не обязательна
+    if (form.category !== 'Оборудование' && form.pricePerPackage <= 0) {
+      setError('Цена за упаковку должна быть больше 0');
+      return;
+    }
+    
+    if (form.packageQuantity <= 0) {
+      setError('Количество в упаковке должно быть больше 0');
+      return;
+    }
+    
+    await onAdd({
+      id: `NOM-${Date.now()}`,
+      name: form.name.trim(),
+      category: form.category,
+      unit: form.unit,
+      manufacturer: form.manufacturer.trim(),
+      active: true,
+      currentPrice: pricePerUnit,
+      packageQuantity: form.packageQuantity,
+    });
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl border border-slate-200 w-full max-w-md shadow-2xl">
+        <div className="p-6 border-b border-slate-200 flex items-center justify-between">
+          <h3 className="text-lg font-bold text-slate-800">Добавить номенклатуру</h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-2xl">×</button>
+        </div>
+        <div className="p-6 space-y-4">
+          {error && (
+            <div className="p-4 bg-red-50 border-2 border-red-300 rounded-lg text-sm text-red-700 flex items-start gap-3">
+              <span className="text-xl flex-shrink-0">⚠️</span>
+              <div className="flex-1">
+                <div className="font-semibold mb-1">Ошибка</div>
+                <div>{error}</div>
+              </div>
+            </div>
+          )}
+          <div>
+            <label className="text-sm text-slate-600 mb-1 block">Категория *</label>
+            <select 
+              value={form.category} 
+              onChange={e => setForm({ ...form, category: e.target.value })}
+              className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-slate-800 focus:outline-none focus:border-blue-500"
+            >
+              <option value="ЛС ПКУ">💉 ЛС ПКУ</option>
+              <option value="ЛС">💊 ЛС</option>
+              <option value="Расходный материал">🩹 Расходных материалов</option>
+              <option value="Оборудование">🩺 Оборудования</option>
+            </select>
+          </div>
+          <div>
+            <label className="text-sm text-slate-600 mb-1 block">Наименование *</label>
+            <input 
+              type="text" 
+              value={form.name} 
+              onChange={e => { setForm({ ...form, name: e.target.value }); setError(null); }}
+              placeholder="Введите наименование"
+              className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" 
+            />
+          </div>
+          <div>
+            <label className="text-sm text-slate-600 mb-1 block">Единица измерения</label>
+            <select 
+              value={form.unit} 
+              onChange={e => setForm({ ...form, unit: e.target.value })}
+              className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-slate-800 focus:outline-none focus:border-blue-500"
+            >
+              <option value="Ампулы">Ампулы</option>
+              <option value="Таблетки">Таблетки</option>
+              <option value="Флаконы">Флаконы</option>
+              <option value="Штуки">Штуки</option>
+              <option value="Упаковки">Упаковки</option>
+            </select>
+          </div>
+          <div>
+            <label className="text-sm text-slate-600 mb-1 block">Производитель</label>
+            <input 
+              type="text" 
+              value={form.manufacturer} 
+              onChange={e => setForm({ ...form, manufacturer: e.target.value })}
+              placeholder="Введите производителя"
+              className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" 
+            />
+          </div>
+          <div>
+            <label className="text-sm text-slate-600 mb-1 block">Количество в упаковке *</label>
+            <input 
+              type="number" 
+              value={form.packageQuantity || ''} 
+              onChange={e => { setForm({ ...form, packageQuantity: parseInt(e.target.value) || 0 }); setError(null); }}
+              placeholder="1"
+              min="1"
+              step="1"
+              className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" 
+            />
+          </div>
+          <div>
+            <label className="text-sm text-slate-600 mb-1 block">Цена за упаковку (₽) *</label>
+            <input 
+              type="number" 
+              value={form.pricePerPackage || ''} 
+              onChange={e => { setForm({ ...form, pricePerPackage: parseFloat(e.target.value) || 0 }); setError(null); }}
+              placeholder="0"
+              min="0"
+              step="0.01"
+              className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" 
+            />
+          </div>
+          <div>
+            <label className="text-sm text-slate-600 mb-1 block">Цена за единицу (₽)</label>
+            <div className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-600 font-semibold">
+              {pricePerUnit.toFixed(2)} ₽
+            </div>
+            <p className="text-xs text-slate-400 mt-1">Рассчитывается автоматически: цена за упаковку ÷ количество</p>
+          </div>
+        </div>
+        <div className="p-6 border-t border-slate-200 flex justify-end gap-3">
+          <button onClick={onClose} className="px-4 py-2 rounded-lg text-slate-600 hover:bg-slate-100">Отмена</button>
+          <button 
+            onClick={handleSubmit} 
+            disabled={!form.name || (form.category !== 'Оборудование' && form.pricePerPackage <= 0) || form.packageQuantity <= 0}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-300 rounded-lg text-white font-medium"
+          >
+            💾 Сохранить
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Error Boundary для предотвращения белой страницы
+export class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean; error: Error | null }> {
+  constructor(props: { children: ReactNode }) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+  
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+  
+  componentDidCatch(error: Error, errorInfo: any) {
+    console.error('Ошибка приложения:', error, errorInfo);
+  }
+  
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen bg-white flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl p-8 border border-red-200 shadow-lg max-w-lg w-full">
+            <div className="text-center">
+              <div className="text-5xl mb-4">⚠️</div>
+              <h2 className="text-xl font-bold text-slate-800 mb-2">Произошла ошибка</h2>
+              <p className="text-red-600 text-sm mb-4">{this.state.error?.message}</p>
+              <button 
+                onClick={() => { this.setState({ hasError: false, error: null }); window.location.reload(); }}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg text-white font-medium"
+              >
+                🔄 Перезагрузить страницу
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+// Проверка подключения
+const isConfigured = gs.isConnected();
+
+// Logo URL - из репозитория
+const LOGO_URL = 'https://raw.githubusercontent.com/petrovich31101984-design/MU_0.5.1/recover-medication-accounting-app-d0ce1/public/logo.png';
 
 // Default export
 export default function App() {
