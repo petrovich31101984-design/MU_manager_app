@@ -1,10 +1,46 @@
 import { useState, useEffect, useCallback, Component, type ReactNode } from 'react';
 import * as gs from './services/googleSheets';
 
-// Placeholder for useData - will be defined later
+// ============ ХУК ДЛЯ РАБОТЫ С ДАННЫМИ ============
 function useData() {
-  return {} as any;
+  const [employees, setEmployees] = useState<gs.Employee[]>([]);
+  const [nomenclature, setNomenclature] = useState<gs.Nomenclature[]>([]);
+  const [arrivals, setArrivals] = useState<gs.Arrival[]>([]);
+  const [expenses, setExpenses] = useState<gs.Expense[]>([]);
+  const [expenseSheets, setExpenseSheets] = useState<gs.ExpenseSheet[]>([]);
+  const [returns, setReturns] = useState<gs.ReturnOperation[]>([]);
+  const [chatMessages, setChatMessages] = useState<gs.ChatMessage[]>([]);
+  const [announcements, setAnnouncements] = useState<gs.Announcement[]>([]);
+  const [auditLog, setAuditLog] = useState<gs.AuditEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [emps, noms, arrs, exps, expSheets, rets, msgs, anns, logs] = await Promise.all([
+        gs.getEmployees(), gs.getNomenclature(), gs.getArrivals(),
+        gs.getExpenses(), gs.getExpenseSheets(), gs.getReturns(), gs.getChatMessages(), gs.getAnnouncements(), gs.getAuditLog(),
+      ]);
+      setEmployees(emps); setNomenclature(noms); setArrivals(arrs);
+      setExpenses(exps); setExpenseSheets(expSheets); setReturns(rets); setChatMessages(msgs); setAnnouncements(anns); setAuditLog(logs);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Ошибка загрузки');
+    } finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { refresh(); }, [refresh]);
+
+  return {
+    employees, setEmployees, nomenclature, setNomenclature,
+    arrivals, setArrivals, expenses, setExpenses, expenseSheets, setExpenseSheets,
+    returns, setReturns, chatMessages, setChatMessages, announcements, setAnnouncements,
+    auditLog, setAuditLog, loading, error, refresh,
+  };
 }
+
+type Page = 'dashboard' | 'employees' | 'nomenclature' | 'arrival' | 'expense' | 'balance' | 'archive' | 'chat' | 'reports' | 'audit' | 'settings';
 
 // Placeholder components - will be defined later
 
@@ -3859,7 +3895,515 @@ const isConfigured = gs.isConnected();
 // Logo URL - из репозитория
 const LOGO_URL = 'https://raw.githubusercontent.com/petrovich31101984-design/MU_0.5.1/recover-medication-accounting-app-d0ce1/public/logo.png';
 
-// Default export
+// ============ СТРАНИЦА НАСТРОЙКИ ============
+function SetupPage() {
+  const [scriptUrl, setScriptUrl] = useState('');
+  const [testing, setTesting] = useState(false);
+  const [result, setResult] = useState<{ success: boolean; message: string } | null>(null);
+
+  const handleConnect = async () => {
+    setTesting(true); setResult(null);
+    gs.saveConfig(scriptUrl);
+    const testResult = await gs.testConnection();
+    if (testResult.success) {
+      setResult({ success: true, message: `✓ Подключено! Таблица: ${testResult.title}` });
+      setTimeout(() => window.location.reload(), 1500);
+    } else {
+      setResult({ success: false, message: `✗ Ошибка: ${testResult.error}` });
+    }
+    setTesting(false);
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-slate-50 flex items-center justify-center p-4">
+      <div className="max-w-2xl w-full">
+        <div className="flex justify-center mb-6">
+          <div className="relative">
+            <div className="absolute inset-0 bg-red-500/10 blur-3xl rounded-full"></div>
+            <img src={LOGO_URL} alt="АлкоСпас" className="relative w-56 h-56 object-contain drop-shadow-xl" />
+          </div>
+        </div>
+        <div className="text-center mb-8">
+          <h1 className="text-4xl font-bold mb-2">
+            <span className="bg-gradient-to-r from-red-500 to-red-700 bg-clip-text text-transparent">АлкоСпас</span>
+          </h1>
+          <p className="text-lg text-slate-700 mb-1">Система медицинского учета</p>
+          <p className="text-sm text-slate-500">Выездное подразделение медицинской помощи</p>
+        </div>
+
+        <div className="bg-white rounded-2xl p-8 border border-slate-200 shadow-xl space-y-6">
+          <div>
+            <h3 className="text-lg font-semibold text-slate-800 mb-3 flex items-center gap-2">
+              <span className="w-7 h-7 bg-blue-600 text-white rounded-full flex items-center justify-center text-sm">1</span>
+              Создайте Google таблицу
+            </h3>
+            <div className="bg-slate-50 rounded-lg p-4 text-sm text-slate-700 space-y-2 border border-slate-200">
+              <p>1. Перейдите в <a href="https://sheets.google.com" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Google Sheets</a></p>
+              <p>2. Создайте новую таблицу</p>
+              <p>3. Откройте <strong>Расширения → Apps Script</strong></p>
+              <p>4. Вставьте код из <code className="bg-slate-200 px-2 py-0.5 rounded text-slate-800">public/google-apps-script-webapp.js</code></p>
+              <p>5. Выполните функцию <code className="bg-slate-200 px-2 py-0.5 rounded text-slate-800">setupDatabase()</code></p>
+            </div>
+          </div>
+          <div>
+            <h3 className="text-lg font-semibold text-slate-800 mb-3 flex items-center gap-2">
+              <span className="w-7 h-7 bg-blue-600 text-white rounded-full flex items-center justify-center text-sm">2</span>
+              Разверните как веб-приложение
+            </h3>
+            <div className="bg-slate-50 rounded-lg p-4 text-sm text-slate-700 space-y-2 border border-slate-200">
+              <p>1. В Apps Script нажмите <strong>Развернуть → Новое развертывание</strong></p>
+              <p>2. Тип: <strong>Веб-приложение</strong></p>
+              <p>3. Выполнять от имени: <strong>Меня</strong></p>
+              <p>4. Доступ: <strong>Все</strong></p>
+              <p>5. Нажмите <strong>Развернуть</strong> и скопируйте URL</p>
+            </div>
+          </div>
+          <div>
+            <h3 className="text-lg font-semibold text-slate-800 mb-3 flex items-center gap-2">
+              <span className="w-7 h-7 bg-blue-600 text-white rounded-full flex items-center justify-center text-sm">3</span>
+              Вставьте URL
+            </h3>
+            <div className="bg-slate-50 rounded-lg p-4 text-sm text-slate-700 border border-slate-200">
+              <p>Скопированный URL вставьте в поле ниже и нажмите "Подключиться"</p>
+            </div>
+          </div>
+
+          <div className="border-t border-slate-200 pt-6 space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-2">URL веб-приложения Apps Script</label>
+              <input type="text" value={scriptUrl} onChange={(e) => setScriptUrl(e.target.value)}
+                placeholder="https://script.google.com/macros/s/AKfycbx..."
+                className="w-full px-4 py-2 bg-white border border-slate-300 rounded-lg text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" />
+            </div>
+            {result && (
+              <div className={`p-4 rounded-lg ${result.success ? 'bg-emerald-50 border border-emerald-200 text-emerald-700' : 'bg-red-50 border border-red-200 text-red-700'}`}>
+                {result.message}
+              </div>
+            )}
+            <button onClick={handleConnect} disabled={testing || !scriptUrl}
+              className="w-full px-6 py-3 bg-gradient-to-r from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 disabled:from-slate-300 disabled:to-slate-300 disabled:text-slate-500 rounded-lg text-white font-medium transition-all shadow-lg shadow-red-600/20 disabled:shadow-none">
+              {testing ? <span className="flex items-center justify-center gap-2"><span className="animate-spin">⏳</span>Проверка...</span> : <span className="flex items-center justify-center gap-2">🔌 Подключиться</span>}
+            </button>
+          </div>
+        </div>
+        <div className="mt-8 text-center">
+          <p className="text-xs text-slate-500">© {new Date().getFullYear()} АлкоСпас • Выездная медицинская помощь</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============ ГЛАВНОЕ ПРИЛОЖЕНИЕ ============
 export default function App() {
-  return <div>App component - to be implemented</div>;
+  const [currentPage, setCurrentPage] = useState<Page>('dashboard');
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const data = useData();
+
+  if (!isConfigured) return <SetupPage />;
+
+  if (data.loading) {
+    return (
+      <div className="min-h-screen bg-white flex items-center justify-center">
+        <div className="text-center">
+          <img src={LOGO_URL} alt="АлкоСпас" className="w-48 h-48 object-contain mx-auto mb-6 animate-pulse" />
+          <div className="text-slate-800 text-xl font-semibold mb-2">Загрузка данных...</div>
+          <div className="text-slate-500 text-sm">Подключение к Google Sheets</div>
+          <div className="mt-6 flex justify-center gap-1.5">
+            <div className="w-3 h-3 bg-blue-600 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
+            <div className="w-3 h-3 bg-red-600 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
+            <div className="w-3 h-3 bg-blue-600 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (data.error) {
+    return <ConnectionErrorScreen error={data.error} onRetry={data.refresh} />;
+  }
+
+  const menuItems: { id: Page; label: string; icon: string }[] = [
+    { id: 'dashboard', label: 'Панель руководителя', icon: '👨‍⚕️' },
+    { id: 'employees', label: 'Сотрудники', icon: '👥' },
+    { id: 'nomenclature', label: 'Номенклатура', icon: '💊' },
+    { id: 'arrival', label: 'Приход к сотруднику', icon: '📥' },
+    { id: 'expense', label: 'Расход у сотрудника', icon: '📤' },
+    { id: 'balance', label: 'Остаток у сотрудника', icon: '🧰' },
+    { id: 'chat', label: 'Сообщения', icon: '💬' },
+    { id: 'reports', label: 'Отчёты', icon: '📈' },
+    { id: 'audit', label: 'Журнал', icon: '📝' },
+    { id: 'archive', label: 'Архив', icon: '🗄️' },
+    { id: 'settings', label: 'Настройки', icon: '⚙️' },
+  ];
+
+  const renderPage = () => {
+    switch (currentPage) {
+      case 'dashboard': return <Dashboard data={data} />;
+      case 'employees': return <EmployeesPage data={data} />;
+      case 'nomenclature': return <NomenclaturePage data={data} />;
+      case 'arrival': return <ArrivalPage data={data} />;
+      case 'expense': return <ExpensePage data={data} />;
+      case 'balance': return <BalancePage data={data} />;
+      case 'archive': return <ArchivePage data={data} />;
+      case 'chat': return <ChatPage data={data} />;
+      case 'reports': return <ReportsPage data={data} />;
+      case 'audit': return <AuditPage data={data} />;
+      case 'settings': return <SettingsPage data={data} />;
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-50 flex overflow-hidden">
+      {/* Sidebar */}
+      <aside className={`${sidebarOpen ? 'w-80' : 'w-20'} bg-white border-r border-slate-200 flex flex-col transition-all duration-300 fixed h-full z-40 shadow-sm`}>
+        <div className="p-4 border-b border-slate-200 flex items-center gap-3">
+          <img src={LOGO_URL} alt="АлкоСпас" className="w-10 h-10 rounded-lg object-contain shrink-0" />
+          {sidebarOpen && (
+            <div className="overflow-hidden">
+              <h1 className="text-sm font-bold text-slate-800 whitespace-nowrap">АлкоСпас</h1>
+              <p className="text-xs text-slate-500 leading-tight">Система медицинского учета</p>
+              <p className="text-xs text-emerald-600 font-semibold">(v. 0.5.2)</p>
+            </div>
+          )}
+        </div>
+        <nav className="flex-1 py-4 overflow-y-auto">
+          {menuItems.map(item => (
+            <button key={item.id} onClick={() => setCurrentPage(item.id)}
+              className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-all ${
+                currentPage === item.id
+                  ? 'bg-blue-50 text-blue-700 border-r-4 border-blue-500'
+                  : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+              }`}>
+              <span className="text-xl shrink-0">{item.icon}</span>
+              {sidebarOpen && <span className="text-sm font-medium whitespace-nowrap">{item.label}</span>}
+            </button>
+          ))}
+        </nav>
+        {sidebarOpen && (
+          <div className="p-4 border-t border-slate-200">
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 bg-emerald-500 rounded-full"></span>
+              <span className="text-xs text-slate-500">Подключено к Google Sheets</span>
+            </div>
+          </div>
+        )}
+      </aside>
+
+      {/* Main */}
+      <div className={`flex-1 ${sidebarOpen ? 'ml-80' : 'ml-20'} transition-all duration-300 max-w-full overflow-hidden`}>
+        <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-6 sticky top-0 z-30 shadow-sm">
+          <div className="flex items-center gap-4">
+            <button onClick={() => setSidebarOpen(!sidebarOpen)} className="p-2 rounded-lg hover:bg-slate-100 text-slate-600">
+              {sidebarOpen ? '◀' : '▶'}
+            </button>
+            <h2 className="text-lg font-semibold text-slate-800">
+              {menuItems.find(m => m.id === currentPage)?.label}
+            </h2>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="text-sm text-slate-500 hidden md:block">
+              {new Date().toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric', month: 'short' })}
+            </div>
+          </div>
+        </header>
+        <main className="p-6 overflow-hidden max-w-full">{renderPage()}</main>
+      </div>
+    </div>
+  );
+}
+
+// ============ DASHBOARD ============
+function Dashboard({ data }: { data: ReturnType<typeof useData> }) {
+  const { employees, nomenclature, arrivals, expenseSheets, returns } = data;
+  const now = new Date();
+  const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  
+  // Предыдущий месяц
+  const lastMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const lastMonth = `${lastMonthDate.getFullYear()}-${String(lastMonthDate.getMonth() + 1).padStart(2, '0')}`;
+  
+  // Названия месяцев
+  const monthNames = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
+  const lastMonthName = monthNames[lastMonthDate.getMonth()];
+  const currentMonthName = monthNames[now.getMonth()];
+  
+  // Названия месяцев в именительном падеже для заголовков
+  const lastMonthNameNominative = lastMonthDate.toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' });
+  const currentMonthNameNominative = now.toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' });
+  
+  const activeEmployees = employees.filter(e => e.status === 'Активен');
+  const allEmployees = employees.filter(e => e.status !== 'Уволен');
+
+  // Расчеты за предыдущий месяц
+  const getArrival = (empId: string, month: string) => arrivals.filter(a => a.employeeId === empId && a.month === month).reduce((s, a) => s + a.amount, 0);
+  const getExpenseValue = (empId: string, month: string) => expenseSheets.filter(s => s.employeeId === empId && s.month === month && !s.archived).reduce((s, sheet) => s + sheet.totalAmount, 0);
+  const getExpenseCount = (empId: string, month: string) => expenseSheets.filter(s => s.employeeId === empId && s.month === month && !s.archived).length;
+
+  // Функция для расчёта остатка по сотруднику и номенклатуре (в количестве)
+  const calculateBalance = (employeeId: string, nomenclatureId: string): number => {
+    let totalArrival = 0;
+    arrivals.forEach(arrival => {
+      if (arrival.employeeId === employeeId && arrival.items) {
+        arrival.items.forEach(item => {
+          if (item.nomenclatureId === nomenclatureId) {
+            totalArrival += item.quantity;
+          }
+        });
+      }
+    });
+
+    let totalExpense = 0;
+    expenseSheets.forEach(sheet => {
+      if (sheet.employeeId === employeeId && !sheet.archived && sheet.items) {
+        sheet.items.forEach(item => {
+          if (item.nomenclatureId === nomenclatureId) {
+            totalExpense += item.quantity;
+          }
+        });
+      }
+    });
+
+    return totalArrival - totalExpense;
+  };
+
+  // Функция для расчёта стоимости остатка сотрудника
+  const calculateEmployeeBalanceValue = (employeeId: string): number => {
+    let totalValue = 0;
+    nomenclature.forEach(item => {
+      const balance = calculateBalance(employeeId, item.id);
+      totalValue += balance * item.currentPrice;
+    });
+    return totalValue;
+  };
+
+  const totalArrivalLastMonth = activeEmployees.reduce((s, e) => s + getArrival(e.id, lastMonth), 0);
+  const totalExpenseLastMonth = activeEmployees.reduce((s, e) => s + getExpenseValue(e.id, lastMonth), 0);
+  const totalExpenseCountLastMonth = activeEmployees.reduce((s, e) => s + getExpenseCount(e.id, lastMonth), 0);
+  
+  // Остатки на руках = сумма стоимости остатков всех сотрудников
+  const totalBalanceOnHand = allEmployees.reduce((s, e) => s + calculateEmployeeBalanceValue(e.id), 0);
+  
+  const pendingReturns = returns.filter(r => r.status === 'Новый').length;
+
+  // Состояния для уведомлений и сообщений
+  const [notifications, setNotifications] = useState<Array<{ id: number; text: string; time: string; type: string }>>([]);
+  const [messages, setMessages] = useState<Array<{ id: number; from: string; text: string; time: string }>>([]);
+
+  const handleNotificationClick = (id: number) => {
+    setNotifications(notifications.filter(n => n.id !== id));
+  };
+
+  const handleMessageClick = (id: number) => {
+    setMessages(messages.filter(m => m.id !== id));
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        {/* Приход за предыдущий месяц */}
+        <div className="bg-white rounded-xl p-5 border border-slate-200 shadow-sm border-l-4 border-l-emerald-500">
+          <div className="text-sm italic text-slate-600 mb-2">Приход<br />(за предыдущий месяц)</div>
+          <div className="text-2xl font-bold text-emerald-600 mb-1">{totalArrivalLastMonth.toLocaleString('ru-RU')} ₽</div>
+          <div className="text-xs text-slate-500">
+            {lastMonthDate.toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' })}
+          </div>
+        </div>
+        {/* Расход за предыдущий месяц */}
+        <div className="bg-white rounded-xl p-5 border border-slate-200 shadow-sm border-l-4 border-l-red-500">
+          <div className="text-sm italic text-slate-600 mb-2">Расход<br />(за предыдущий месяц)</div>
+          <div className="text-2xl font-bold text-red-600 mb-1">{totalExpenseLastMonth.toLocaleString('ru-RU')} ₽</div>
+          <div className="text-xs text-slate-500">
+            {lastMonthDate.toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' })}
+          </div>
+        </div>
+        {/* Остатки на руках */}
+        <div className="bg-white rounded-xl p-5 border border-slate-200 shadow-sm border-l-4 border-l-blue-500 flex flex-col justify-between">
+          <div className="text-sm italic text-slate-600 mb-2">Остатки на руках</div>
+          <div className="flex-1"></div>
+          <div className="text-2xl font-bold text-blue-600 mb-1">{totalBalanceOnHand.toLocaleString('ru-RU')} ₽</div>
+          <div className="text-xs text-slate-500 mt-auto">
+            {now.toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' })}
+          </div>
+        </div>
+        {/* Листов расхода за предыдущий месяц */}
+        <div className="bg-white rounded-xl p-5 border border-slate-200 shadow-sm border-l-4 border-l-orange-500">
+          <div className="text-sm italic text-slate-600 mb-2">Листов расхода<br />(за предыдущий месяц)</div>
+          <div className="text-2xl font-bold text-orange-600 mb-1">{totalExpenseCountLastMonth}</div>
+          <div className="text-xs text-slate-500">
+            {lastMonthDate.toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' })}
+          </div>
+        </div>
+      </div>
+
+      {/* Блоки уведомлений и сообщений */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {/* Блок уведомлений */}
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm h-96 flex flex-col">
+          <div className="p-5 border-b border-slate-200 flex items-center justify-between">
+            <h3 className="text-lg font-bold text-slate-800">🔔 Уведомления</h3>
+            <span className="px-3 py-1 bg-red-100 text-red-700 rounded-full text-sm font-semibold">
+              {notifications.length}
+            </span>
+          </div>
+          <div className="flex-1 overflow-y-auto p-4 space-y-3">
+            {notifications.length === 0 ? (
+              <div className="text-center text-slate-400 mt-8">
+                <div className="text-3xl mb-2">🔕</div>
+                <p>Нет новых уведомлений</p>
+              </div>
+            ) : (
+              notifications.map(notif => (
+                <div
+                  key={notif.id}
+                  className={`p-4 rounded-lg border ${
+                    notif.type === 'warning' ? 'bg-yellow-50 border-yellow-200' :
+                    notif.type === 'alert' ? 'bg-red-50 border-red-200' :
+                    'bg-blue-50 border-blue-200'
+                  }`}
+                >
+                  <div className="flex items-start gap-3">
+                    <div className="flex-1">
+                      <p className="text-sm text-slate-800 font-medium">{notif.text}</p>
+                      <p className="text-xs text-slate-500 mt-1">{notif.time}</p>
+                    </div>
+                    <span 
+                      onClick={() => handleNotificationClick(notif.id)}
+                      className="text-red-500 text-lg cursor-pointer hover:text-red-700 transition-colors"
+                    >×</span>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        {/* Блок сообщений */}
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm h-96 flex flex-col">
+          <div className="p-5 border-b border-slate-200 flex items-center justify-between">
+            <h3 className="text-lg font-bold text-slate-800">💬 Сообщения</h3>
+            <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm font-semibold">
+              {messages.length}
+            </span>
+          </div>
+          <div className="flex-1 overflow-y-auto p-4 space-y-3">
+            {messages.length === 0 ? (
+              <div className="text-center text-slate-400 mt-8">
+                <div className="text-3xl mb-2">📭</div>
+                <p>Нет новых сообщений</p>
+              </div>
+            ) : (
+              messages.map(msg => (
+                <div
+                  key={msg.id}
+                  className="p-4 rounded-lg border border-slate-200 bg-slate-50"
+                >
+                  <div className="flex items-start gap-3">
+                    <div className="w-10 h-10 bg-blue-500 rounded-full flex items-center justify-center text-white font-bold text-sm shrink-0">
+                      {(msg.from || '').split(' ').map(n => n[0]).join('')}
+                    </div>
+                    <div className="flex-1">
+                      <p className="text-sm font-semibold text-slate-800">{msg.from}</p>
+                      <p className="text-sm text-slate-600 mt-1">{msg.text}</p>
+                      <p className="text-xs text-slate-500 mt-1">{msg.time}</p>
+                    </div>
+                    <span 
+                      onClick={() => handleMessageClick(msg.id)}
+                      className="text-red-500 text-lg cursor-pointer hover:text-red-700 transition-colors"
+                    >×</span>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </div>
+
+      {pendingReturns > 0 && (
+        <div className="bg-orange-50 border border-orange-200 rounded-xl p-4 flex items-center gap-3">
+          <span className="text-2xl">↩️</span>
+          <div className="flex-1">
+            <span className="text-orange-700 font-semibold">Ожидают обработки возвратов:</span>
+            <span className="text-orange-600 ml-2">{pendingReturns}</span>
+          </div>
+        </div>
+      )}
+
+      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+        <div className="p-5 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
+          <h3 className="text-lg font-bold text-slate-800">Сотрудники — общая сводка</h3>
+          <div className="text-sm text-slate-600">
+            Активных сотрудников: <span className="font-semibold text-emerald-600">{activeEmployees.length}</span>
+          </div>
+        </div>
+        <div className="overflow-y-auto" style={{ maxHeight: '400px' }}>
+          <table className="w-full">
+            <thead className="sticky top-0 bg-slate-50 z-10">
+              <tr className="border-b border-slate-200 text-left bg-slate-50">
+                <th className="px-5 py-3 text-xs font-medium text-slate-600 uppercase">Сотрудник</th>
+                <th className="px-5 py-3 text-xs font-medium text-slate-600 uppercase">Статус</th>
+                <th className="px-5 py-3 text-xs font-medium text-slate-600 uppercase">Приход<br /><span className="text-xs font-normal">({lastMonthNameNominative})</span></th>
+                <th className="px-5 py-3 text-xs font-medium text-slate-600 uppercase">Расход<br /><span className="text-xs font-normal">({lastMonthNameNominative})</span></th>
+                <th className="px-5 py-3 text-xs font-medium text-slate-600 uppercase">Остатки на руках</th>
+                <th className="px-5 py-3 text-xs font-medium text-slate-600 uppercase">Листов расхода<br /><span className="text-xs font-normal">({lastMonthNameNominative})</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              {employees
+                .filter(e => e.status !== 'Уволен')
+                .sort((a, b) => {
+                  if (a.status === 'Активен' && b.status !== 'Активен') return -1;
+                  if (a.status !== 'Активен' && b.status === 'Активен') return 1;
+                  return 0;
+                })
+                .map(emp => {
+                  const arr = getArrival(emp.id, lastMonth);
+                  const exp = getExpenseValue(emp.id, lastMonth);
+                  const bal = calculateEmployeeBalanceValue(emp.id);
+                  const expenseCount = getExpenseCount(emp.id, lastMonth);
+                  return (
+                  <tr key={emp.id} className="border-b border-slate-100 hover:bg-blue-50 hover:shadow-md transition-all duration-200 cursor-pointer">
+                    <td className="px-5 py-3">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white bg-blue-500">
+                          {(emp.fullName || '').split(' ').slice(0, 2).map(n => n[0]).join('')}
+                        </div>
+                        <div>
+                          <div className="text-sm font-medium text-slate-800">{emp.fullName || 'Без имени'}</div>
+                          <div className="text-xs text-slate-500">{emp.position || 'Не указана'}</div>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-5 py-3">
+                      <div className="flex flex-wrap gap-1">
+                        {emp.blocked ? (
+                          <span className="px-2 py-1 rounded-full text-xs bg-orange-100 text-orange-700">🔒 Заблокирован</span>
+                        ) : emp.shiftOpen ? (
+                          <span className="px-2 py-1 rounded-full text-xs bg-emerald-100 text-emerald-700">🟢 Активен</span>
+                        ) : (
+                          <span className="px-2 py-1 rounded-full text-xs bg-slate-100 text-slate-600">⚪ Не активен</span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-5 py-3 text-sm text-emerald-600">{arr.toLocaleString('ru-RU')} ₽</td>
+                    <td className="px-5 py-3 text-sm text-red-600">{exp.toLocaleString('ru-RU')} ₽</td>
+                    <td className={`px-5 py-3 text-sm font-semibold ${bal >= 0 ? 'text-blue-600' : 'text-red-600'}`}>
+                      {bal.toLocaleString('ru-RU')} ₽
+                    </td>
+                    <td className="px-5 py-3 text-sm text-orange-600">{expenseCount}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        {employees.length === 0 && (
+          <div className="p-8 text-center text-slate-500">
+            <div className="text-3xl mb-2">👥</div>
+            <p>Нет данных о сотрудниках</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
