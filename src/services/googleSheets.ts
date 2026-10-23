@@ -39,6 +39,7 @@ export async function testConnection(): Promise<{ success: boolean; title?: stri
     const response = await fetch(`${config.scriptUrl}?action=test`);
     if (!response.ok) return { success: false, error: `Ошибка ${response.status}` };
     const data = await response.json();
+    console.log('🔍 Результат testConnection:', data);
     if (data.error) return { success: false, error: data.error };
     return { success: true, title: data.title, sheets: data.sheets };
   } catch (error) {
