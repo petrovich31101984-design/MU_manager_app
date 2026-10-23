@@ -4075,6 +4075,9 @@ export default function App() {
     return <ConnectionErrorScreen error={data.error} onRetry={data.refresh} />;
   }
 
+  // Подсчёт непрочитанных сообщений
+  const unreadMessagesCount = data.chatMessages.filter(msg => !msg.read).length;
+
   const menuItems: { id: Page; label: string; icon: string }[] = [
     { id: 'dashboard', label: 'Панель руководителя', icon: '👨‍⚕️' },
     { id: 'employees', label: 'Сотрудники', icon: '👥' },
@@ -4128,7 +4131,16 @@ export default function App() {
                   : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
               }`}>
               <span className="text-xl shrink-0">{item.icon}</span>
-              {sidebarOpen && <span className="text-sm font-medium whitespace-nowrap">{item.label}</span>}
+              {sidebarOpen && (
+                <>
+                  <span className="text-sm font-medium whitespace-nowrap flex-1">{item.label}</span>
+                  {item.id === 'chat' && unreadMessagesCount > 0 && (
+                    <span className="bg-red-500 text-white text-xs font-bold rounded-full min-w-[20px] h-5 flex items-center justify-center px-1.5">
+                      {unreadMessagesCount}
+                    </span>
+                  )}
+                </>
+              )}
             </button>
           ))}
         </nav>
