@@ -329,9 +329,26 @@ function ChatPage({ data }: { data: ReturnType<typeof useData> }) {
     return { text: 'Не активен', color: 'bg-slate-100 text-slate-700' };
   };
 
+  // Отладка: выводим все сообщения
+  console.log('💬 ВСЕ СООБЩЕНИЯ:', chatMessages.map(m => ({
+    id: m.id,
+    fromId: m.fromId,
+    fromName: m.fromName,
+    toId: m.toId,
+    toName: m.toName,
+    text: m.text.substring(0, 50)
+  })));
+
+  console.log('🔍 ФИЛЬТР для сотрудника:', selectedChat, 'и руководителя MGR');
+
+  // Более гибкий фильтр: проверяем разные варианты ID руководителя
+  const isManagerId = (id: string) => id === 'MGR' || id === 'Руководитель' || id === 'Manager' || id === 'admin';
+
   const chatWith = chatMessages.filter(m =>
-    (m.fromId === selectedChat && m.toId === 'MGR') || (m.fromId === 'MGR' && m.toId === selectedChat)
+    (m.fromId === selectedChat && isManagerId(m.toId)) || (isManagerId(m.fromId) && m.toId === selectedChat)
   ).sort((a, b) => a.date.localeCompare(b.date));
+
+  console.log('✅ НАЙДЕНО СООБЩЕНИЙ:', chatWith.length);
 
   const sendMessage = async () => {
     if (!newMessage.trim() || !selectedChat) return;
