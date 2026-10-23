@@ -415,14 +415,34 @@ function ChatPage({ data }: { data: ReturnType<typeof useData> }) {
           <div className="flex-1 overflow-y-auto">
             {activeEmployees.map(emp => {
               const status = getEmployeeStatus(emp);
+              // Подсчёт непрочитанных сообщений от этого сотрудника
+              const unreadCount = chatMessages.filter(m => 
+                m.fromId === emp.id && 
+                m.toId === 'MGR' && 
+                !m.read
+              ).length;
               return (
                 <button key={emp.id} onClick={() => setSelectedChat(selectedChat === emp.id ? '' : emp.id)}
                   className={`w-full p-4 flex items-center gap-3 text-left border-b border-slate-100 ${
                     selectedChat === emp.id ? 'bg-red-50 border-l-4 border-l-red-500' : 'hover:bg-slate-50'
                   }`}>
-                  <div className="w-10 h-10 bg-emerald-500 rounded-full flex items-center justify-center text-sm font-bold text-white">{emp.fullName[0]}</div>
+                  <div className="w-10 h-10 bg-emerald-500 rounded-full flex items-center justify-center text-sm font-bold text-white relative">
+                    {emp.fullName[0]}
+                    {unreadCount > 0 && (
+                      <div className="absolute -top-1 -right-1 bg-red-500 text-white text-xs font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1">
+                        {unreadCount}
+                      </div>
+                    )}
+                  </div>
                   <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium text-slate-800 truncate">{formatFullName(emp.fullName)}</div>
+                    <div className="flex items-center justify-between">
+                      <div className="text-sm font-medium text-slate-800 truncate">{formatFullName(emp.fullName)}</div>
+                      {unreadCount > 0 && (
+                        <div className="bg-red-500 text-white text-xs font-bold rounded-full min-w-[20px] h-5 flex items-center justify-center px-1.5 ml-2">
+                          {unreadCount}
+                        </div>
+                      )}
+                    </div>
                     <div className="mt-1">
                       <span className={`inline-block px-2 py-0.5 rounded-full text-xs ${status.color}`}>
                         {status.text}
