@@ -201,14 +201,29 @@ export async function getReturns(): Promise<ReturnOperation[]> {
 }
 
 export async function getChatMessages(): Promise<ChatMessage[]> {
+  console.log('📥 Загрузка сообщений из Google Sheets...');
   const data = await fetchData('getChat');
-  return data.map((row: any) => ({
-    id: row['ID'] || '', fromId: row['От кого (ID)'] || '', fromName: row['От кого (ФИО)'] || '',
-    toId: row['Кому (ID)'] || '', toName: row['Кому (ФИО)'] || '',
-    role: row['Роль'] || 'Сотрудник', text: row['Текст'] || '',
-    date: row['Дата и время'] || '', read: row['Прочитано'] === 'ДА',
-    priority: row['Приоритет'] || 'Обычное',
-  }));
+  console.log('📨 Получены данные из getChat:', data);
+  console.log('📊 Количество строк:', data.length);
+  
+  const messages = data.map((row: any) => {
+    console.log('📝 Строка из таблицы:', row);
+    return {
+      id: row['ID'] || '', 
+      fromId: row['От кого (ID)'] || '', 
+      fromName: row['От кого (ФИО)'] || '',
+      toId: row['Кому (ID)'] || '', 
+      toName: row['Кому (ФИО)'] || '',
+      role: row['Роль'] || 'Сотрудник', 
+      text: row['Текст'] || '',
+      date: row['Дата и время'] || '', 
+      read: row['Прочитано'] === 'ДА',
+      priority: row['Приоритет'] || 'Обычное',
+    };
+  });
+  
+  console.log('✅ Преобразованные сообщения:', messages);
+  return messages;
 }
 
 export async function getAuditLog(): Promise<AuditEntry[]> {
