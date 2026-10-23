@@ -353,12 +353,29 @@ function ChatPage({ data }: { data: ReturnType<typeof useData> }) {
   const sendMessage = async () => {
     if (!newMessage.trim() || !selectedChat) return;
     const emp = activeEmployees.find(e => e.id === selectedChat);
-    await gs.addChatMessage({
-      id: `MSG-${Date.now()}`, fromId: 'MGR', fromName: 'Руководитель',
-      toId: selectedChat, toName: emp?.fullName || '',
-      role: 'Руководитель', text: newMessage, priority: 'Обычное',
+    
+    const newMsg = {
+      id: `MSG-${Date.now()}`, 
+      fromId: 'MGR', 
+      fromName: 'Руководитель',
+      toId: selectedChat, 
+      toName: emp?.fullName || '',
+      role: 'Руководитель', 
+      text: newMessage, 
+      date: new Date().toISOString(),
+      read: false,
+      priority: 'Обычное',
+    };
+    
+    // Добавляем сообщение в локальный state
+    data.setChatMessages([...data.chatMessages, newMsg]);
+    setNewMessage('');
+    
+    // Отправляем в Google Sheets в фоне (без ожидания)
+    gs.addChatMessage(newMsg).catch(err => {
+      console.error('Ошибка отправки сообщения:', err);
+      alert('Ошибка при отправке сообщения. Попробуйте ещё раз.');
     });
-    setNewMessage(''); data.refresh();
   };
 
   const handleCreateAnnouncement = async (announcement: { title: string; text: string; recipients: string[] }) => {
