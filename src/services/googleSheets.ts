@@ -231,7 +231,7 @@ export async function getChatMessages(): Promise<ChatMessage[]> {
           role: row['Роль'] || 'Сотрудник', 
           text: row['Текст'] || '',
           date: row['Дата и время'] || '', 
-          read: row['Прочитано'] === 'ДА',
+          read: String(row['Прочитано'] || '').toUpperCase().trim() === 'ДА',
           priority: row['Приоритет'] || 'Обычное',
         }));
       }
@@ -330,8 +330,14 @@ export async function addChatMessage(message: Partial<ChatMessage>): Promise<voi
   await postData('addChatMessage', message);
 }
 
-export async function updateChatMessage(id: string, message: Partial<ChatMessage>): Promise<void> {
-  await postData('updateChatMessage', { id, ...message });
+export async function updateChatMessage(id: string, updates: { read?: boolean; [key: string]: any }): Promise<void> {
+  // Преобразуем поле read в формат для Google Sheets
+  const sheetUpdates: any = { ...updates };
+  if (updates.read !== undefined) {
+    sheetUpdates['Прочитано'] = updates.read ? 'ДА' : 'НЕТ';
+    delete sheetUpdates.read;
+  }
+  await postData('updateChatMessage', { id, ...sheetUpdates });
 }
 export async function createAnnouncement(announcement: { title: string; text: string; recipients: string[] }): Promise<void> {
   await postData('createAnnouncement', {

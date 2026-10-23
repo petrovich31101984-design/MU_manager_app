@@ -431,7 +431,7 @@ function ChatPage({ data }: { data: ReturnType<typeof useData> }) {
                   const updatedMessages = chatMessages.map(m => {
                     if (m.fromId === emp.id && m.toId === 'MGR' && !m.read) {
                       // Обновляем в Google Sheets
-                      gs.updateChatMessage(m.id, { ...m, read: true }).catch(err => {
+                      gs.updateChatMessage(m.id, { read: true }).catch(err => {
                         console.error('Ошибка обновления статуса сообщения:', err);
                       });
                       return { ...m, read: true };

@@ -112,7 +112,8 @@ function doPost(e) {
         addChatMessageData(data);
         return jsonResponse({ success: true });
       case 'updateChatMessage':
-        updateChatMessageData(data.id, data);
+        const { id, ...updates } = data;
+        updateChatMessageData(id, updates);
         return jsonResponse({ success: true });
       case 'createAnnouncement':
         createAnnouncementData(data);
