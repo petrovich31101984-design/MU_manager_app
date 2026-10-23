@@ -206,28 +206,42 @@ export async function getReturns(): Promise<ReturnOperation[]> {
 
 export async function getChatMessages(): Promise<ChatMessage[]> {
   console.log('📥 Загрузка сообщений из Google Sheets...');
-  const data = await fetchData('getChat');
-  console.log('📨 Получены данные из getChat:', data);
-  console.log('📊 Количество строк:', data.length);
   
-  const messages = data.map((row: any) => {
-    console.log('📝 Строка из таблицы:', row);
-    return {
-      id: row['ID'] || '', 
-      fromId: row['От кого (ID)'] || '', 
-      fromName: row['От кого (ФИО)'] || '',
-      toId: row['Кому (ID)'] || '', 
-      toName: row['Кому (ФИО)'] || '',
-      role: row['Роль'] || 'Сотрудник', 
-      text: row['Текст'] || '',
-      date: row['Дата и время'] || '', 
-      read: row['Прочитано'] === 'ДА',
-      priority: row['Приоритет'] || 'Обычное',
-    };
-  });
+  // Пробуем разные возможные названия листов
+  const possibleSheetNames = ['Чат', 'Chat', 'Сообщения', 'Messages', 'Чаты', 'Chats'];
   
-  console.log('✅ Преобразованные сообщения:', messages);
-  return messages;
+  for (const sheetName of possibleSheetNames) {
+    console.log(`🔍 Пробуем прочитать из листа: "${sheetName}"`);
+    try {
+      const config = getConfig();
+      const url = `${config.scriptUrl}?action=getChat&sheet=${sheetName}`;
+      const response = await fetch(url);
+      const data = await response.json();
+      
+      console.log(`📊 Лист "${sheetName}" вернул:`, data.length, 'записей');
+      
+      if (data.length > 0) {
+        console.log(`✅ Найдены сообщения в листе "${sheetName}"!`);
+        return data.map((row: any) => ({
+          id: row['ID'] || '', 
+          fromId: row['От кого (ID)'] || '', 
+          fromName: row['От кого (ФИО)'] || '',
+          toId: row['Кому (ID)'] || '', 
+          toName: row['Кому (ФИО)'] || '',
+          role: row['Роль'] || 'Сотрудник', 
+          text: row['Текст'] || '',
+          date: row['Дата и время'] || '', 
+          read: row['Прочитано'] === 'ДА',
+          priority: row['Приоритет'] || 'Обычное',
+        }));
+      }
+    } catch (error) {
+      console.log(`❌ Ошибка чтения из листа "${sheetName}":`, error);
+    }
+  }
+  
+  console.log('⚠️ Не найдено сообщений ни в одном из листов');
+  return [];
 }
 
 export async function getAuditLog(): Promise<AuditEntry[]> {
