@@ -1,6 +1,6 @@
 /**
  * СМУ - Система Медицинского Учёта
- * Google Apps Script Web App
+ * Google Apps Script Web App для руководителя
  * Версия 0.5.2
  */
 
@@ -22,8 +22,6 @@ function doGet(e) {
       case 'getNomenclature':
         return jsonResponse(getNomenclatureData());
       case 'getPrices':
-        return jsonResponse(getPricesData());
-      case 'getPriceHistory':
         return jsonResponse(getPricesData());
       case 'getArrivals':
         return jsonResponse(getArrivalsData());
@@ -54,6 +52,7 @@ function doPost(e) {
     const data = body.data;
     
     switch(action) {
+      // Сотрудники
       case 'addEmployee':
         addEmployeeData(data);
         return jsonResponse({ success: true });
@@ -66,6 +65,8 @@ function doPost(e) {
       case 'deleteEmployee':
         deleteEmployeeData(data.id);
         return jsonResponse({ success: true });
+      
+      // Номенклатура
       case 'addNomenclature':
         addNomenclatureData(data);
         return jsonResponse({ success: true });
@@ -75,6 +76,8 @@ function doPost(e) {
       case 'deleteNomenclature':
         deleteNomenclatureData(data.id);
         return jsonResponse({ success: true });
+      
+      // Приход
       case 'addArrival':
         addArrivalData(data);
         return jsonResponse({ success: true });
@@ -90,6 +93,13 @@ function doPost(e) {
       case 'restoreArrival':
         restoreArrivalData(data.id);
         return jsonResponse({ success: true });
+      
+      // Расход
+      case 'addExpense':
+        addExpenseData(data);
+        return jsonResponse({ success: true });
+      
+      // Листы расхода
       case 'addExpenseSheet':
         addExpenseSheetData(data);
         return jsonResponse({ success: true });
@@ -102,12 +112,13 @@ function doPost(e) {
       case 'restoreExpenseSheet':
         restoreExpenseSheetData(data.id);
         return jsonResponse({ success: true });
-      case 'addExpense':
-        addExpenseData(data);
-        return jsonResponse({ success: true });
+      
+      // Возвраты
       case 'addReturn':
         addReturnData(data);
         return jsonResponse({ success: true });
+      
+      // Чат
       case 'addChatMessage':
         addChatMessageData(data);
         return jsonResponse({ success: true });
@@ -115,15 +126,20 @@ function doPost(e) {
         const { id, ...updates } = data;
         updateChatMessageData(id, updates);
         return jsonResponse({ success: true });
+      
+      // Объявления
       case 'createAnnouncement':
         createAnnouncementData(data);
         return jsonResponse({ success: true });
+      
+      // Журнал изменений
       case 'addAuditLog':
         addAuditLogData(data);
         return jsonResponse({ success: true });
       case 'clearAuditLog':
         clearAuditLogData();
         return jsonResponse({ success: true });
+      
       default:
         return jsonResponse({ error: 'Неизвестное действие: ' + action });
     }
@@ -273,7 +289,6 @@ function getArrivalsData() {
 }
 
 function addArrivalData(data) {
-  // Преобразуем items в JSON строку
   if (data.items && Array.isArray(data.items)) {
     data.items = JSON.stringify(data.items);
   }
@@ -325,7 +340,6 @@ function getExpenseSheetsData() {
     headers.forEach((h, i) => {
       const val = row[i];
       if (h === 'items' || h === 'Позиции') {
-        // Парсим JSON строку
         if (typeof val === 'string' && val) {
           try {
             obj[h] = JSON.parse(val);
@@ -354,7 +368,6 @@ function getExpenseSheetsData() {
 }
 
 function addExpenseSheetData(data) {
-  // Преобразуем items в JSON строку
   if (data.items && Array.isArray(data.items)) {
     data.items = JSON.stringify(data.items);
   }
@@ -401,7 +414,6 @@ function getChatData() {
     const obj = {};
     headers.forEach((h, i) => {
       const val = row[i];
-      // Генерируем ID если он пустой
       if (h === 'ID' && (val === '' || val === null || val === undefined)) {
         obj[h] = 'MSG-AUTO-' + (index + 1) + '-' + Date.now();
       } else if (val instanceof Date) {
@@ -458,7 +470,6 @@ function clearAuditLogData() {
 function setupDatabase() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   
-  // Список всех необходимых листов
   const requiredSheets = [
     'Сотрудники',
     'Номенклатура',
@@ -474,7 +485,6 @@ function setupDatabase() {
     'Отчёты'
   ];
   
-  // Заголовки для каждого листа
   const sheetHeaders = {
     'Сотрудники': ['ID', 'Персональный номер', 'ФИО', 'Пароль', 'Статус', 'Должность', 'Дата найма', 'Заблокирован', 'Телефон', 'Последний вход', 'Примечание', 'Смена открыта'],
     'Номенклатура': ['ID', 'Название', 'Категория', 'Ед. измерения', 'Производитель', 'Актуальна', 'Количество в упаковке'],
@@ -490,7 +500,6 @@ function setupDatabase() {
     'Отчёты': ['ID', 'Тип', 'Период', 'Данные', 'Создано']
   };
   
-  // Создаём листы если их нет
   requiredSheets.forEach(sheetName => {
     let sheet = ss.getSheetByName(sheetName);
     if (!sheet) {
@@ -498,7 +507,6 @@ function setupDatabase() {
       Logger.log('Создан лист: ' + sheetName);
     }
     
-    // Добавляем заголовки если их нет
     const headers = sheetHeaders[sheetName];
     if (headers && sheet.getLastRow() === 0) {
       sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
@@ -506,7 +514,6 @@ function setupDatabase() {
     }
   });
   
-  // Удаляем стандартный лист "Лист1" если он есть
   const defaultSheet = ss.getSheetByName('Лист1');
   if (defaultSheet && ss.getSheets().length > 1) {
     ss.deleteSheet(defaultSheet);
@@ -517,7 +524,7 @@ function setupDatabase() {
   SpreadsheetApp.getUi().alert('База данных успешно настроена! Создано листов: ' + requiredSheets.length);
 }
 
-// ==================== ТЕСТОВАЯ ФУНКЦИЯ ====================
+// ==================== ТЕСТОВЫЕ ФУНКЦИИ ====================
 
 function testGetChatData() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
