@@ -329,6 +329,10 @@ export async function addReturn(returnOp: Partial<ReturnOperation>): Promise<voi
 export async function addChatMessage(message: Partial<ChatMessage>): Promise<void> {
   await postData('addChatMessage', message);
 }
+
+export async function updateChatMessage(id: string, message: Partial<ChatMessage>): Promise<void> {
+  await postData('updateChatMessage', { id, ...message });
+}
 export async function createAnnouncement(announcement: { title: string; text: string; recipients: string[] }): Promise<void> {
   await postData('createAnnouncement', {
     id: `ANN-${Date.now()}`, ...announcement,

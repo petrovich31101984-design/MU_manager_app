@@ -421,18 +421,34 @@ function ChatPage({ data }: { data: ReturnType<typeof useData> }) {
                 m.toId === 'MGR' && 
                 !m.read
               ).length;
+              
+              // Функция открытия диалога с обнулением счётчика
+              const handleOpenChat = () => {
+                setSelectedChat(selectedChat === emp.id ? '' : emp.id);
+                
+                // Помечаем все сообщения от этого сотрудника как прочитанные
+                if (selectedChat !== emp.id) {
+                  const updatedMessages = chatMessages.map(m => {
+                    if (m.fromId === emp.id && m.toId === 'MGR' && !m.read) {
+                      // Обновляем в Google Sheets
+                      gs.updateChatMessage(m.id, { ...m, read: true }).catch(err => {
+                        console.error('Ошибка обновления статуса сообщения:', err);
+                      });
+                      return { ...m, read: true };
+                    }
+                    return m;
+                  });
+                  data.setChatMessages(updatedMessages);
+                }
+              };
+              
               return (
-                <button key={emp.id} onClick={() => setSelectedChat(selectedChat === emp.id ? '' : emp.id)}
+                <button key={emp.id} onClick={handleOpenChat}
                   className={`w-full p-4 flex items-center gap-3 text-left border-b border-slate-100 ${
                     selectedChat === emp.id ? 'bg-red-50 border-l-4 border-l-red-500' : 'hover:bg-slate-50'
                   }`}>
-                  <div className="w-10 h-10 bg-emerald-500 rounded-full flex items-center justify-center text-sm font-bold text-white relative">
+                  <div className="w-10 h-10 bg-emerald-500 rounded-full flex items-center justify-center text-sm font-bold text-white">
                     {emp.fullName[0]}
-                    {unreadCount > 0 && (
-                      <div className="absolute -top-1 -right-1 bg-red-500 text-white text-xs font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1">
-                        {unreadCount}
-                      </div>
-                    )}
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between">
