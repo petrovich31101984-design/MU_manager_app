@@ -49,9 +49,12 @@ export async function testConnection(): Promise<{ success: boolean; title?: stri
 async function fetchData(action: string): Promise<any[]> {
   const config = getConfig();
   if (!config.scriptUrl) throw new Error('Не настроено подключение');
+  console.log(`🔗 Запрос к Apps Script: action=${action}`);
   const response = await fetch(`${config.scriptUrl}?action=${action}`);
+  console.log(`📡 Ответ от Apps Script для ${action}:`, response.status);
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   const data = await response.json();
+  console.log(`📦 Данные от Apps Script для ${action}:`, data);
   if (data.error) throw new Error(data.error);
   return data;
 }
