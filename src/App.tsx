@@ -446,7 +446,7 @@ function ChatPage({ data }: { data: ReturnType<typeof useData> }) {
                     <div className="text-4xl mb-2">💬</div><p>Нет сообщений</p>
                   </div>
                 ) : chatWith.map(msg => {
-                  // Форматирование даты в ЧЧ.ММ.ГГ ЧЧ.ММ.
+                  // Форматирование даты в ЧЧ.ММ, ДД.ММ.ГГ
                   const formatDateTime = (dateStr: string) => {
                     if (!dateStr) return '';
                     try {
@@ -456,7 +456,7 @@ function ChatPage({ data }: { data: ReturnType<typeof useData> }) {
                       const year = String(date.getFullYear()).slice(-2);
                       const hours = String(date.getHours()).padStart(2, '0');
                       const minutes = String(date.getMinutes()).padStart(2, '0');
-                      return `${day}.${month}.${year} ${hours}.${minutes}.`;
+                      return `${hours}.${minutes}, ${day}.${month}.${year}`;
                     } catch {
                       return dateStr;
                     }
@@ -468,7 +468,7 @@ function ChatPage({ data }: { data: ReturnType<typeof useData> }) {
                         msg.fromId === 'MGR' ? 'bg-blue-500 text-white rounded-br-md' : 'bg-white text-slate-800 rounded-bl-md border border-slate-200'
                       }`}>
                         <p className="text-sm">{msg.text}</p>
-                        <div className={`text-xs mt-1 ${msg.fromId === 'MGR' ? 'text-blue-100' : 'text-slate-500'}`}>{formatDateTime(msg.date)}</div>
+                        <div className={`text-xs mt-1 italic ${msg.fromId === 'MGR' ? 'text-blue-100' : 'text-blue-600'}`}>{formatDateTime(msg.date)}</div>
                       </div>
                     </div>
                   );
