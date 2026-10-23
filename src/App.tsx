@@ -445,16 +445,34 @@ function ChatPage({ data }: { data: ReturnType<typeof useData> }) {
                   <div className="text-center text-slate-500 mt-8">
                     <div className="text-4xl mb-2">💬</div><p>Нет сообщений</p>
                   </div>
-                ) : chatWith.map(msg => (
-                  <div key={msg.id} className={`flex ${msg.fromId === 'MGR' ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`max-w-[70%] rounded-2xl px-4 py-2.5 ${
-                      msg.fromId === 'MGR' ? 'bg-blue-500 text-white rounded-br-md' : 'bg-white text-slate-800 rounded-bl-md border border-slate-200'
-                    }`}>
-                      <p className="text-sm">{msg.text}</p>
-                      <div className={`text-xs mt-1 ${msg.fromId === 'MGR' ? 'text-blue-100' : 'text-slate-500'}`}>{msg.date}</div>
+                ) : chatWith.map(msg => {
+                  // Форматирование даты в ЧЧ.ММ.ГГ ЧЧ.ММ.
+                  const formatDateTime = (dateStr: string) => {
+                    if (!dateStr) return '';
+                    try {
+                      const date = new Date(dateStr);
+                      const day = String(date.getDate()).padStart(2, '0');
+                      const month = String(date.getMonth() + 1).padStart(2, '0');
+                      const year = String(date.getFullYear()).slice(-2);
+                      const hours = String(date.getHours()).padStart(2, '0');
+                      const minutes = String(date.getMinutes()).padStart(2, '0');
+                      return `${day}.${month}.${year} ${hours}.${minutes}.`;
+                    } catch {
+                      return dateStr;
+                    }
+                  };
+                  
+                  return (
+                    <div key={msg.id} className={`flex ${msg.fromId === 'MGR' ? 'justify-end' : 'justify-start'}`}>
+                      <div className={`max-w-[70%] rounded-2xl px-4 py-2.5 ${
+                        msg.fromId === 'MGR' ? 'bg-blue-500 text-white rounded-br-md' : 'bg-white text-slate-800 rounded-bl-md border border-slate-200'
+                      }`}>
+                        <p className="text-sm">{msg.text}</p>
+                        <div className={`text-xs mt-1 ${msg.fromId === 'MGR' ? 'text-blue-100' : 'text-slate-500'}`}>{formatDateTime(msg.date)}</div>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
 
               <div className="p-4 border-t border-slate-200">
