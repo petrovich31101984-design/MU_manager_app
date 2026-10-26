@@ -383,7 +383,17 @@ function ChatPage({ data }: { data: ReturnType<typeof useData> }) {
     try {
       await gs.createAnnouncement(announcement);
       setShowCreateAnnouncement(false);
-      data.refresh();
+      // Локальное обновление без перезагрузки
+      const newAnnouncement: gs.Announcement = {
+        id: `ANN-${Date.now()}`,
+        title: announcement.title,
+        text: announcement.text,
+        recipients: announcement.recipients,
+        createdBy: 'Руководитель',
+        date: new Date().toISOString(),
+        active: true,
+      };
+      data.setAnnouncements([...data.announcements, newAnnouncement]);
     } catch (error) {
       console.error('Ошибка создания объявления:', error);
     }
@@ -397,7 +407,10 @@ function ChatPage({ data }: { data: ReturnType<typeof useData> }) {
     try {
       await gs.updateAnnouncement(id, updates);
       setEditingAnnouncement(null);
-      data.refresh();
+      // Локальное обновление без перезагрузки
+      data.setAnnouncements(
+        data.announcements.map(a => a.id === id ? { ...a, ...updates } : a)
+      );
     } catch (error) {
       console.error('Ошибка обновления объявления:', error);
     }
@@ -418,9 +431,9 @@ function ChatPage({ data }: { data: ReturnType<typeof useData> }) {
       console.log('📤 Отправка запроса на удаление...');
       await gs.deleteAnnouncement(id);
       console.log('✅ Запрос на удаление отправлен успешно');
-      console.log('🔄 Обновление данных...');
-      await data.refresh();
-      console.log('✅ Данные обновлены');
+      // Локальное обновление без перезагрузки
+      data.setAnnouncements(data.announcements.filter(a => a.id !== id));
+      console.log('✅ Локальные данные обновлены');
     } catch (error) {
       console.error('❌ Ошибка удаления объявления:', error);
       alert('Ошибка при удалении объявления: ' + (error as Error).message);
