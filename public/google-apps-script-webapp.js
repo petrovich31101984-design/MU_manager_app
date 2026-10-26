@@ -228,7 +228,7 @@ function updateRow(sheetName, id, updates) {
 }
 
 function deleteRow(sheetName, id) {
-  Logger.log('🔍 deleteRow вызван для листа: ' + sheetName + ', ID: ' + id);
+  Logger.log('🔍 deleteRow вызван для листа: ' + sheetName + ', ID: ' + id + ' (тип: ' + typeof id + ')');
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(sheetName);
   if (!sheet) {
@@ -239,12 +239,21 @@ function deleteRow(sheetName, id) {
   const data = sheet.getDataRange().getValues();
   const headers = data[0];
   const idColumn = headers.indexOf('ID');
+  Logger.log('📊 Заголовки: ' + JSON.stringify(headers));
   Logger.log('📊 Найдено строк: ' + data.length + ', индекс столбца ID: ' + idColumn);
+  
+  // Выводим все ID для отладки
+  Logger.log('📋 Все ID в таблице:');
+  for (let i = 1; i < data.length; i++) {
+    Logger.log('  Строка ' + i + ': ID = ' + data[i][idColumn] + ' (тип: ' + typeof data[i][idColumn] + ')');
+  }
   
   let found = false;
   for (let i = 1; i < data.length; i++) {
-    Logger.log('🔎 Проверка строки ' + i + ': ID = ' + data[i][idColumn]);
-    if (data[i][idColumn] === id) {
+    const rowId = String(data[i][idColumn]).trim();
+    const searchId = String(id).trim();
+    Logger.log('🔎 Сравнение строки ' + i + ': "' + rowId + '" === "' + searchId + '" ? ' + (rowId === searchId));
+    if (rowId === searchId) {
       Logger.log('✅ Найдена строка для удаления: ' + i);
       sheet.deleteRow(i + 1);
       found = true;

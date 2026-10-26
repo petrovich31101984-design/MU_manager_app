@@ -381,11 +381,13 @@ function ChatPage({ data }: { data: ReturnType<typeof useData> }) {
 
   const handleCreateAnnouncement = async (announcement: { title: string; text: string; recipients: string[] }) => {
     try {
-      await gs.createAnnouncement(announcement);
+      const id = `ANN-${Date.now()}`;
+      console.log('📝 Создание объявления с ID:', id);
+      await gs.createAnnouncement({ id, ...announcement });
       setShowCreateAnnouncement(false);
       // Локальное обновление без перезагрузки
       const newAnnouncement: gs.Announcement = {
-        id: `ANN-${Date.now()}`,
+        id,
         title: announcement.title,
         text: announcement.text,
         recipients: announcement.recipients,

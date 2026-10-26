@@ -339,9 +339,10 @@ export async function updateChatMessage(id: string, updates: { read?: boolean; [
   }
   await postData('updateChatMessage', { id, ...sheetUpdates });
 }
-export async function createAnnouncement(announcement: { title: string; text: string; recipients: string[] }): Promise<void> {
+export async function createAnnouncement(announcement: { id: string; title: string; text: string; recipients: string[] }): Promise<void> {
+  console.log('📤 Создание объявления:', announcement);
   await postData('createAnnouncement', {
-    'ID': `ANN-${Date.now()}`,
+    'ID': announcement.id,
     'Заголовок': announcement.title,
     'Текст': announcement.text,
     'Получатели': announcement.recipients.join(','),
