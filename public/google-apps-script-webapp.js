@@ -135,10 +135,8 @@ function doPost(e) {
         updateAnnouncementData(data['ID'], data);
         return jsonResponse({ success: true });
       case 'deleteAnnouncement':
-        Logger.log('🗑️ Получен запрос на удаление объявления с ID: ' + data['ID']);
-        const deleteResult = deleteAnnouncementData(data['ID']);
-        Logger.log('✅ Результат удаления: ' + JSON.stringify(deleteResult));
-        return jsonResponse({ success: true, deleted: deleteResult });
+        deleteAnnouncementData(data['ID']);
+        return jsonResponse({ success: true });
       
       // Журнал изменений
       case 'addAuditLog':
@@ -228,44 +226,31 @@ function updateRow(sheetName, id, updates) {
 }
 
 function deleteRow(sheetName, id) {
-  Logger.log('🔍 deleteRow вызван для листа: ' + sheetName + ', ID: ' + id + ' (тип: ' + typeof id + ')');
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(sheetName);
   if (!sheet) {
-    Logger.log('❌ Лист не найден: ' + sheetName);
     throw new Error('Лист не найден: ' + sheetName);
   }
   
   const data = sheet.getDataRange().getValues();
   const headers = data[0];
   const idColumn = headers.indexOf('ID');
-  Logger.log('📊 Заголовки: ' + JSON.stringify(headers));
-  Logger.log('📊 Найдено строк: ' + data.length + ', индекс столбца ID: ' + idColumn);
   
-  // Выводим все ID для отладки
-  Logger.log('📋 Все ID в таблице:');
-  for (let i = 1; i < data.length; i++) {
-    Logger.log('  Строка ' + i + ': ID = ' + data[i][idColumn] + ' (тип: ' + typeof data[i][idColumn] + ')');
+  if (idColumn === -1) {
+    throw new Error('Столбец "ID" не найден в листе "' + sheetName + '"');
   }
   
-  let found = false;
+  const searchId = String(id).trim();
+  
   for (let i = 1; i < data.length; i++) {
     const rowId = String(data[i][idColumn]).trim();
-    const searchId = String(id).trim();
-    Logger.log('🔎 Сравнение строки ' + i + ': "' + rowId + '" === "' + searchId + '" ? ' + (rowId === searchId));
     if (rowId === searchId) {
-      Logger.log('✅ Найдена строка для удаления: ' + i);
       sheet.deleteRow(i + 1);
-      found = true;
-      break;
+      return { success: true, deletedId: id };
     }
   }
   
-  if (!found) {
-    Logger.log('❌ Строка с ID ' + id + ' не найдена');
-  }
-  
-  return { found: found, id: id };
+  throw new Error('Запись с ID ' + id + ' не найдена');
 }
 
 // ==================== СОТРУДНИКИ ====================
@@ -481,10 +466,7 @@ function updateAnnouncementData(id, updates) {
 }
 
 function deleteAnnouncementData(id) {
-  Logger.log('🔍 Поиск объявления с ID: ' + id);
-  const result = deleteRow('Объявления', id);
-  Logger.log('📊 Результат deleteRow: ' + JSON.stringify(result));
-  return result;
+  return deleteRow('Объявления', id);
 }
 
 // ==================== ЖУРНАЛ ИЗМЕНЕНИЙ ====================
