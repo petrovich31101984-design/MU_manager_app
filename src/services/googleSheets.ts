@@ -350,6 +350,19 @@ export async function createAnnouncement(announcement: { title: string; text: st
     'Активно': 'ДА',
   });
 }
+
+export async function updateAnnouncement(id: string, updates: Partial<Announcement>): Promise<void> {
+  const sheetUpdates: any = { 'ID': id };
+  if (updates.title !== undefined) sheetUpdates['Заголовок'] = updates.title;
+  if (updates.text !== undefined) sheetUpdates['Текст'] = updates.text;
+  if (updates.recipients !== undefined) sheetUpdates['Получатели'] = updates.recipients.join(',');
+  if (updates.active !== undefined) sheetUpdates['Активно'] = updates.active ? 'ДА' : 'НЕТ';
+  await postData('updateAnnouncement', sheetUpdates);
+}
+
+export async function deleteAnnouncement(id: string): Promise<void> {
+  await postData('deleteAnnouncement', { 'ID': id });
+}
 export async function addAuditLog(log: Partial<AuditEntry>): Promise<void> {
   await postData('addAuditLog', log);
 }

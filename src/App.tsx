@@ -309,6 +309,7 @@ function ChatPage({ data }: { data: ReturnType<typeof useData> }) {
   const [selectedChat, setSelectedChat] = useState<string>('');
   const [newMessage, setNewMessage] = useState('');
   const [showCreateAnnouncement, setShowCreateAnnouncement] = useState(false);
+  const [editingAnnouncement, setEditingAnnouncement] = useState<gs.Announcement | null>(null);
 
   // Функция для форматирования ФИО в формате "Фамилия И.О."
   const formatFullName = (fullName: string) => {
@@ -388,6 +389,30 @@ function ChatPage({ data }: { data: ReturnType<typeof useData> }) {
     }
   };
 
+  const handleEditAnnouncement = async (announcement: gs.Announcement) => {
+    setEditingAnnouncement(announcement);
+  };
+
+  const handleUpdateAnnouncement = async (id: string, updates: Partial<gs.Announcement>) => {
+    try {
+      await gs.updateAnnouncement(id, updates);
+      setEditingAnnouncement(null);
+      data.refresh();
+    } catch (error) {
+      console.error('Ошибка обновления объявления:', error);
+    }
+  };
+
+  const handleDeleteAnnouncement = async (id: string) => {
+    if (!confirm('Удалить это объявление?')) return;
+    try {
+      await gs.deleteAnnouncement(id);
+      data.refresh();
+    } catch (error) {
+      console.error('Ошибка удаления объявления:', error);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-start">
@@ -404,7 +429,11 @@ function ChatPage({ data }: { data: ReturnType<typeof useData> }) {
       </div>
 
       {/* Панель объявлений для руководителя */}
-      <AnnouncementsPanel announcements={announcements} />
+      <AnnouncementsPanel 
+        announcements={announcements}
+        onEdit={handleEditAnnouncement}
+        onDelete={handleDeleteAnnouncement}
+      />
 
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden flex h-[600px] shadow-sm">
         <div className="w-80 border-r border-slate-200 flex flex-col">
@@ -546,6 +575,14 @@ function ChatPage({ data }: { data: ReturnType<typeof useData> }) {
         <CreateAnnouncementModal
           onClose={() => setShowCreateAnnouncement(false)}
           onCreate={handleCreateAnnouncement}
+        />
+      )}
+
+      {editingAnnouncement && (
+        <EditAnnouncementModal
+          announcement={editingAnnouncement}
+          onClose={() => setEditingAnnouncement(null)}
+          onUpdate={handleUpdateAnnouncement}
         />
       )}
     </div>
@@ -935,7 +972,11 @@ function ArrivalCardModal({
 }
 
 // ============ КОМПОНЕНТ ОТОБРАЖЕНИЯ ОБЪЯВЛЕНИЙ ============
-function AnnouncementsPanel({ announcements }: { announcements: gs.Announcement[] }) {
+function AnnouncementsPanel({ announcements, onEdit, onDelete }: { 
+  announcements: gs.Announcement[];
+  onEdit: (announcement: gs.Announcement) => void;
+  onDelete: (id: string) => void;
+}) {
   const activeAnnouncements = announcements.filter(a => a.active);
   
   if (activeAnnouncements.length === 0) return null;
@@ -943,16 +984,32 @@ function AnnouncementsPanel({ announcements }: { announcements: gs.Announcement[
   return (
     <div className="bg-yellow-50 border-2 border-yellow-300 rounded-lg p-4 mb-4">
       <h3 className="text-lg font-bold text-yellow-800 mb-3 flex items-center gap-2">
-        📢 Объявления
+        📢 Объявления ({activeAnnouncements.length})
       </h3>
       <div className="space-y-3">
         {activeAnnouncements.map(announcement => (
           <div key={announcement.id} className="bg-white rounded-lg p-4 border border-yellow-200">
             <div className="flex justify-between items-start mb-2">
-              <h4 className="font-semibold text-slate-800">{announcement.title}</h4>
-              <span className="text-xs text-slate-500">
-                {new Date(announcement.date).toLocaleDateString('ru-RU')}
-              </span>
+              <h4 className="font-semibold text-slate-800 flex-1">{announcement.title}</h4>
+              <div className="flex items-center gap-2 ml-2">
+                <button
+                  onClick={() => onEdit(announcement)}
+                  className="text-blue-600 hover:text-blue-800 text-sm"
+                  title="Редактировать"
+                >
+                  ✏️
+                </button>
+                <button
+                  onClick={() => onDelete(announcement.id)}
+                  className="text-red-600 hover:text-red-800 text-sm"
+                  title="Удалить"
+                >
+                  🗑️
+                </button>
+                <span className="text-xs text-slate-500">
+                  {new Date(announcement.date).toLocaleDateString('ru-RU')}
+                </span>
+              </div>
             </div>
             <p className="text-sm text-slate-700 whitespace-pre-wrap">{announcement.text}</p>
             <div className="mt-2 text-xs text-slate-500">
@@ -1056,6 +1113,106 @@ function CreateAnnouncementModal({
             className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-300 rounded-lg text-white font-medium"
           >
             📢 Опубликовать
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============ МОДАЛЬНОЕ ОКНО РЕДАКТИРОВАНИЯ ОБЪЯВЛЕНИЯ ============
+function EditAnnouncementModal({
+  announcement,
+  onClose,
+  onUpdate
+}: {
+  announcement: gs.Announcement;
+  onClose: () => void;
+  onUpdate: (id: string, updates: Partial<gs.Announcement>) => void;
+}) {
+  const [title, setTitle] = useState(announcement.title);
+  const [text, setText] = useState(announcement.text);
+  const [recipients, setRecipients] = useState<string[]>(announcement.recipients || ['employees', 'warehouse']);
+
+  const handleSubmit = () => {
+    if (!title.trim() || !text.trim()) {
+      alert('Заполните заголовок и текст объявления');
+      return;
+    }
+    onUpdate(announcement.id, { title, text, recipients });
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl border border-slate-200 w-full max-w-2xl shadow-2xl">
+        <div className="p-6 border-b border-slate-200">
+          <h3 className="text-lg font-bold text-slate-800">✏️ Редактировать объявление</h3>
+        </div>
+        <div className="p-6 space-y-4">
+          <div>
+            <label className="text-sm text-slate-600 mb-1 block">Заголовок *</label>
+            <input
+              type="text"
+              value={title}
+              onChange={e => setTitle(e.target.value)}
+              placeholder="Введите заголовок объявления"
+              className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+            />
+          </div>
+          <div>
+            <label className="text-sm text-slate-600 mb-1 block">Текст объявления *</label>
+            <textarea
+              value={text}
+              onChange={e => setText(e.target.value)}
+              placeholder="Введите текст объявления"
+              rows={6}
+              className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 resize-none"
+            />
+          </div>
+          <div>
+            <label className="text-sm text-slate-600 mb-2 block">Получатели</label>
+            <div className="space-y-2">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={recipients.includes('employees')}
+                  onChange={e => {
+                    if (e.target.checked) {
+                      setRecipients([...recipients, 'employees']);
+                    } else {
+                      setRecipients(recipients.filter(r => r !== 'employees'));
+                    }
+                  }}
+                  className="w-4 h-4 text-blue-600 border-slate-300 rounded focus:ring-blue-500"
+                />
+                <span className="text-sm text-slate-700">Сотрудники</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={recipients.includes('warehouse')}
+                  onChange={e => {
+                    if (e.target.checked) {
+                      setRecipients([...recipients, 'warehouse']);
+                    } else {
+                      setRecipients(recipients.filter(r => r !== 'warehouse'));
+                    }
+                  }}
+                  className="w-4 h-4 text-blue-600 border-slate-300 rounded focus:ring-blue-500"
+                />
+                <span className="text-sm text-slate-700">Кладовщик</span>
+              </label>
+            </div>
+          </div>
+        </div>
+        <div className="p-6 border-t border-slate-200 flex justify-end gap-3">
+          <button onClick={onClose} className="px-4 py-2 rounded-lg text-slate-600 hover:bg-slate-100">Отмена</button>
+          <button
+            onClick={handleSubmit}
+            disabled={!title.trim() || !text.trim()}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-300 rounded-lg text-white font-medium"
+          >
+            💾 Сохранить
           </button>
         </div>
       </div>

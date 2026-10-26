@@ -131,6 +131,12 @@ function doPost(e) {
       case 'createAnnouncement':
         createAnnouncementData(data);
         return jsonResponse({ success: true });
+      case 'updateAnnouncement':
+        updateAnnouncementData(data['ID'], data);
+        return jsonResponse({ success: true });
+      case 'deleteAnnouncement':
+        deleteAnnouncementData(data['ID']);
+        return jsonResponse({ success: true });
       
       // Журнал изменений
       case 'addAuditLog':
@@ -442,6 +448,14 @@ function getAnnouncementsData() {
 
 function createAnnouncementData(data) {
   appendRow('Объявления', data);
+}
+
+function updateAnnouncementData(id, updates) {
+  updateRow('Объявления', id, updates);
+}
+
+function deleteAnnouncementData(id) {
+  deleteRow('Объявления', id);
 }
 
 // ==================== ЖУРНАЛ ИЗМЕНЕНИЙ ====================
