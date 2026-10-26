@@ -382,10 +382,9 @@ function ChatPage({ data }: { data: ReturnType<typeof useData> }) {
     try {
       await gs.createAnnouncement(announcement);
       setShowCreateAnnouncement(false);
-      alert('✅ Объявление успешно создано!');
+      data.refresh();
     } catch (error) {
       console.error('Ошибка создания объявления:', error);
-      alert('❌ Ошибка при создании объявления. Попробуйте ещё раз.');
     }
   };
 

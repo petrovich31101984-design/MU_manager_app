@@ -341,8 +341,13 @@ export async function updateChatMessage(id: string, updates: { read?: boolean; [
 }
 export async function createAnnouncement(announcement: { title: string; text: string; recipients: string[] }): Promise<void> {
   await postData('createAnnouncement', {
-    id: `ANN-${Date.now()}`, ...announcement,
-    createdBy: 'Руководитель', date: new Date().toISOString(), active: true,
+    'ID': `ANN-${Date.now()}`,
+    'Заголовок': announcement.title,
+    'Текст': announcement.text,
+    'Получатели': announcement.recipients.join(','),
+    'Кем создано': 'Руководитель',
+    'Дата': new Date().toISOString(),
+    'Активно': 'ДА',
   });
 }
 export async function addAuditLog(log: Partial<AuditEntry>): Promise<void> {
