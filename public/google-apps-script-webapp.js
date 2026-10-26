@@ -548,26 +548,3 @@ function setupDatabase() {
   Logger.log('База данных успешно настроена!');
   SpreadsheetApp.getUi().alert('База данных успешно настроена! Создано листов: ' + requiredSheets.length);
 }
-
-// ==================== ТЕСТОВЫЕ ФУНКЦИИ ====================
-
-function testGetChatData() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName('Чат');
-  
-  Logger.log('=== ТЕСТ getChatData ===');
-  Logger.log('Все листы: ' + ss.getSheets().map(s => s.getName()).join(', '));
-  Logger.log('Лист "Чат" найден: ' + (sheet ? 'ДА' : 'НЕТ'));
-  
-  if (sheet) {
-    const data = sheet.getDataRange().getValues();
-    Logger.log('Количество строк: ' + data.length);
-    Logger.log('Заголовки: ' + JSON.stringify(data[0]));
-    if (data.length > 1) {
-      Logger.log('Первая строка данных: ' + JSON.stringify(data[1]));
-    }
-  }
-  
-  const result = getChatData();
-  Logger.log('Результат getChatData: ' + JSON.stringify(result));
-}
