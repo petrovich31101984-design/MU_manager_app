@@ -361,7 +361,10 @@ export async function updateAnnouncement(id: string, updates: Partial<Announceme
 }
 
 export async function deleteAnnouncement(id: string): Promise<void> {
+  console.log('📤 Удаление объявления ID:', id);
+  console.log('📦 Отправляемые данные:', { 'ID': id });
   await postData('deleteAnnouncement', { 'ID': id });
+  console.log('✅ Запрос на удаление отправлен');
 }
 export async function addAuditLog(log: Partial<AuditEntry>): Promise<void> {
   await postData('addAuditLog', log);

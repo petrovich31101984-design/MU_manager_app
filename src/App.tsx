@@ -404,12 +404,26 @@ function ChatPage({ data }: { data: ReturnType<typeof useData> }) {
   };
 
   const handleDeleteAnnouncement = async (id: string) => {
-    if (!confirm('Удалить это объявление?')) return;
+    console.log('🗑️ Попытка удаления объявления с ID:', id);
+    if (!id) {
+      console.error('❌ ID объявления пустой!');
+      alert('Ошибка: ID объявления не найден');
+      return;
+    }
+    if (!confirm('Удалить это объявление?')) {
+      console.log('❌ Удаление отменено пользователем');
+      return;
+    }
     try {
+      console.log('📤 Отправка запроса на удаление...');
       await gs.deleteAnnouncement(id);
-      data.refresh();
+      console.log('✅ Запрос на удаление отправлен успешно');
+      console.log('🔄 Обновление данных...');
+      await data.refresh();
+      console.log('✅ Данные обновлены');
     } catch (error) {
-      console.error('Ошибка удаления объявления:', error);
+      console.error('❌ Ошибка удаления объявления:', error);
+      alert('Ошибка при удалении объявления: ' + (error as Error).message);
     }
   };
 
@@ -979,44 +993,50 @@ function AnnouncementsPanel({ announcements, onEdit, onDelete }: {
 }) {
   const activeAnnouncements = announcements.filter(a => a.active);
   
+  console.log('📢 Все объявления:', announcements);
+  console.log('✅ Активные объявления:', activeAnnouncements);
+  
   if (activeAnnouncements.length === 0) return null;
+
+  // Показываем только последнее объявление
+  const latestAnnouncement = activeAnnouncements[activeAnnouncements.length - 1];
 
   return (
     <div className="bg-yellow-50 border-2 border-yellow-300 rounded-lg p-4 mb-4">
       <h3 className="text-lg font-bold text-yellow-800 mb-3 flex items-center gap-2">
-        📢 Объявления ({activeAnnouncements.length})
+        📢 Последнее объявление
       </h3>
-      <div className="space-y-3">
-        {activeAnnouncements.map(announcement => (
-          <div key={announcement.id} className="bg-white rounded-lg p-4 border border-yellow-200">
-            <div className="flex justify-between items-start mb-2">
-              <h4 className="font-semibold text-slate-800 flex-1">{announcement.title}</h4>
-              <div className="flex items-center gap-2 ml-2">
-                <button
-                  onClick={() => onEdit(announcement)}
-                  className="text-blue-600 hover:text-blue-800 text-sm"
-                  title="Редактировать"
-                >
-                  ✏️
-                </button>
-                <button
-                  onClick={() => onDelete(announcement.id)}
-                  className="text-red-600 hover:text-red-800 text-sm"
-                  title="Удалить"
-                >
-                  🗑️
-                </button>
-                <span className="text-xs text-slate-500">
-                  {new Date(announcement.date).toLocaleDateString('ru-RU')}
-                </span>
-              </div>
-            </div>
-            <p className="text-sm text-slate-700 whitespace-pre-wrap">{announcement.text}</p>
-            <div className="mt-2 text-xs text-slate-500">
-              От: {announcement.createdBy}
-            </div>
+      <div className="bg-white rounded-lg p-4 border border-yellow-200">
+        <div className="flex justify-between items-start mb-2">
+          <h4 className="font-semibold text-slate-800 flex-1">{latestAnnouncement.title}</h4>
+          <div className="flex items-center gap-2 ml-2">
+            <button
+              onClick={() => onEdit(latestAnnouncement)}
+              className="text-blue-600 hover:text-blue-800 text-sm"
+              title="Редактировать"
+            >
+              ✏️
+            </button>
+            <button
+              onClick={() => {
+                console.log('🗑️ Нажата кнопка удаления для объявления:', latestAnnouncement);
+                console.log('🆔 ID объявления:', latestAnnouncement.id);
+                onDelete(latestAnnouncement.id);
+              }}
+              className="text-red-600 hover:text-red-800 text-sm"
+              title="Удалить"
+            >
+              🗑️
+            </button>
+            <span className="text-xs text-slate-500">
+              {new Date(latestAnnouncement.date).toLocaleDateString('ru-RU')}
+            </span>
           </div>
-        ))}
+        </div>
+        <p className="text-sm text-slate-700 whitespace-pre-wrap">{latestAnnouncement.text}</p>
+        <div className="mt-2 text-xs text-slate-500">
+          От: {latestAnnouncement.createdBy}
+        </div>
       </div>
     </div>
   );
