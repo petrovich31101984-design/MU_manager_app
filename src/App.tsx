@@ -32,6 +32,41 @@ function useData() {
 
   useEffect(() => { refresh(); }, [refresh]);
 
+  useEffect(() => {
+    let active = true;
+    let updating = false;
+
+    const refreshLiveData = async () => {
+      if (updating) return;
+      updating = true;
+      try {
+        const [emps, messages] = await Promise.all([
+          gs.getEmployees(),
+          gs.getChatMessages(),
+        ]);
+        if (active) {
+          setEmployees(emps);
+          setChatMessages(current => messages.map(message => {
+            const localMessage = current.find(item => item.id === message.id);
+            return localMessage?.read && !message.read ? { ...message, read: true } : message;
+          }));
+        }
+      } catch (err) {
+        console.error('Ошибка автоматического обновления данных:', err);
+      } finally {
+        updating = false;
+      }
+    };
+
+    const interval = window.setInterval(refreshLiveData, 5000);
+    window.addEventListener('focus', refreshLiveData);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+      window.removeEventListener('focus', refreshLiveData);
+    };
+  }, []);
+
   return {
     employees, setEmployees, nomenclature, setNomenclature,
     arrivals, setArrivals, expenses, setExpenses, expenseSheets, setExpenseSheets,
@@ -41,6 +76,9 @@ function useData() {
 }
 
 type Page = 'dashboard' | 'employees' | 'nomenclature' | 'arrival' | 'expense' | 'balance' | 'archive' | 'chat' | 'reports' | 'audit' | 'settings';
+
+const isIncomingUnreadMessage = (msg: gs.ChatMessage) =>
+  !msg.read && !['MGR', 'Руководитель', 'Manager', 'admin'].includes(msg.fromId);
 
 // Placeholder components - will be defined later
 
@@ -473,20 +511,18 @@ function ChatPage({ data }: { data: ReturnType<typeof useData> }) {
             {activeEmployees.map(emp => {
               const status = getEmployeeStatus(emp);
               // Подсчёт непрочитанных сообщений от этого сотрудника
-              const unreadCount = chatMessages.filter(m => 
-                m.fromId === emp.id && 
-                m.toId === 'MGR' && 
-                !m.read
+              const unreadCount = chatMessages.filter(m =>
+                m.fromId === emp.id && !m.read
               ).length;
-              
+
               // Функция открытия диалога с обнулением счётчика
               const handleOpenChat = () => {
                 setSelectedChat(selectedChat === emp.id ? '' : emp.id);
-                
+
                 // Помечаем все сообщения от этого сотрудника как прочитанные
                 if (selectedChat !== emp.id) {
                   const updatedMessages = chatMessages.map(m => {
-                    if (m.fromId === emp.id && m.toId === 'MGR' && !m.read) {
+                    if (m.fromId === emp.id && !m.read) {
                       // Обновляем в Google Sheets
                       gs.updateChatMessage(m.id, { read: true }).catch(err => {
                         console.error('Ошибка обновления статуса сообщения:', err);
@@ -3301,7 +3337,7 @@ function EmployeesPage({ data }: { data: ReturnType<typeof useData> }) {
     if (!emp) return;
     
     // Обновляем локальное состояние
-    const updatedEmployee = { ...emp, shiftOpen: open };
+    const updatedEmployee = { ...emp, shiftOpen: open, status: open ? 'Активен' : 'Неактивен' };
     setEmployees(employees.map(e => e.id === id ? updatedEmployee : e));
     
     // Отправляем в Google Sheets в фоне
@@ -4303,7 +4339,7 @@ export default function App() {
   }
 
   // Подсчёт непрочитанных сообщений
-  const unreadMessagesCount = data.chatMessages.filter(msg => !msg.read).length;
+  const unreadMessagesCount = data.chatMessages.filter(isIncomingUnreadMessage).length;
 
   const menuItems: { id: Page; label: string; icon: string }[] = [
     { id: 'dashboard', label: 'Панель руководителя', icon: '👨‍⚕️' },
@@ -4336,7 +4372,7 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 flex overflow-hidden">
+    <div className="min-h-screen bg-slate-50 flex">
       {/* Sidebar */}
       <aside className={`${sidebarOpen ? 'w-80' : 'w-20'} bg-white border-r border-slate-200 flex flex-col transition-all duration-300 fixed h-full z-40 shadow-sm`}>
         <div className="p-4 border-b border-slate-200 flex items-center gap-3">
@@ -4382,7 +4418,7 @@ export default function App() {
       </aside>
 
       {/* Main */}
-      <div className={`flex-1 ${sidebarOpen ? 'ml-80' : 'ml-20'} transition-all duration-300 max-w-full overflow-hidden`}>
+      <div className={`flex-1 ${sidebarOpen ? 'ml-80' : 'ml-20'} transition-all duration-300 max-w-full`}>
         <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-6 sticky top-0 z-30 shadow-sm">
           <div className="flex items-center gap-4">
             <button onClick={() => setSidebarOpen(!sidebarOpen)} className="p-2 rounded-lg hover:bg-slate-100 text-slate-600">
@@ -4406,7 +4442,7 @@ export default function App() {
 
 // ============ DASHBOARD ============
 function Dashboard({ data }: { data: ReturnType<typeof useData> }) {
-  const { employees, nomenclature, arrivals, expenseSheets, returns } = data;
+  const { employees, arrivals, expenseSheets, returns } = data;
   const now = new Date();
   const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
   
@@ -4431,41 +4467,14 @@ function Dashboard({ data }: { data: ReturnType<typeof useData> }) {
   const getExpenseValue = (empId: string, month: string) => expenseSheets.filter(s => s.employeeId === empId && s.month === month && !s.archived).reduce((s, sheet) => s + sheet.totalAmount, 0);
   const getExpenseCount = (empId: string, month: string) => expenseSheets.filter(s => s.employeeId === empId && s.month === month && !s.archived).length;
 
-  // Функция для расчёта остатка по сотруднику и номенклатуре (в количестве)
-  const calculateBalance = (employeeId: string, nomenclatureId: string): number => {
-    let totalArrival = 0;
-    arrivals.forEach(arrival => {
-      if (arrival.employeeId === employeeId && arrival.items) {
-        arrival.items.forEach(item => {
-          if (item.nomenclatureId === nomenclatureId) {
-            totalArrival += item.quantity;
-          }
-        });
-      }
-    });
-
-    let totalExpense = 0;
-    expenseSheets.forEach(sheet => {
-      if (sheet.employeeId === employeeId && !sheet.archived && sheet.items) {
-        sheet.items.forEach(item => {
-          if (item.nomenclatureId === nomenclatureId) {
-            totalExpense += item.quantity;
-          }
-        });
-      }
-    });
-
-    return totalArrival - totalExpense;
-  };
-
-  // Функция для расчёта стоимости остатка сотрудника
   const calculateEmployeeBalanceValue = (employeeId: string): number => {
-    let totalValue = 0;
-    nomenclature.forEach(item => {
-      const balance = calculateBalance(employeeId, item.id);
-      totalValue += balance * item.currentPrice;
-    });
-    return totalValue;
+    const totalArrival = arrivals
+      .filter(arrival => arrival.employeeId === employeeId && !arrival.archived)
+      .reduce((sum, arrival) => sum + arrival.amount, 0);
+    const totalExpense = expenseSheets
+      .filter(sheet => sheet.employeeId === employeeId && !sheet.archived)
+      .reduce((sum, sheet) => sum + sheet.totalAmount, 0);
+    return totalArrival - totalExpense;
   };
 
   const totalArrivalLastMonth = activeEmployees.reduce((s, e) => s + getArrival(e.id, lastMonth), 0);
@@ -4477,16 +4486,26 @@ function Dashboard({ data }: { data: ReturnType<typeof useData> }) {
   
   const pendingReturns = returns.filter(r => r.status === 'Новый').length;
 
-  // Состояния для уведомлений и сообщений
   const [notifications, setNotifications] = useState<Array<{ id: number; text: string; time: string; type: string }>>([]);
-  const [messages, setMessages] = useState<Array<{ id: number; from: string; text: string; time: string }>>([]);
+  const messages = data.chatMessages
+    .filter(isIncomingUnreadMessage)
+    .sort((a, b) => b.date.localeCompare(a.date))
+    .map(msg => ({
+      id: msg.id,
+      from: msg.fromName || 'Сотрудник',
+      text: msg.text,
+      time: msg.date ? new Date(msg.date).toLocaleString('ru-RU') : '',
+    }));
 
   const handleNotificationClick = (id: number) => {
     setNotifications(notifications.filter(n => n.id !== id));
   };
 
-  const handleMessageClick = (id: number) => {
-    setMessages(messages.filter(m => m.id !== id));
+  const handleMessageClick = (id: string) => {
+    data.setChatMessages(data.chatMessages.map(msg => msg.id === id ? { ...msg, read: true } : msg));
+    gs.updateChatMessage(id, { read: true }).catch(err => {
+      console.error('Ошибка обновления статуса сообщения:', err);
+    });
   };
 
   return (

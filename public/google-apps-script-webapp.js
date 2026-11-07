@@ -268,7 +268,10 @@ function updateEmployeeData(id, updates) {
 }
 
 function updateEmployeeShiftData(id, shiftOpen) {
-  updateRow('Сотрудники', id, { 'Смена открыта': shiftOpen ? 'ДА' : 'НЕТ' });
+  updateRow('Сотрудники', id, {
+    'Смена открыта': shiftOpen ? 'ДА' : 'НЕТ',
+    'Статус': shiftOpen ? 'Активен' : 'Неактивен'
+  });
 }
 
 function deleteEmployeeData(id) {
