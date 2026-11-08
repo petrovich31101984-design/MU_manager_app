@@ -281,11 +281,38 @@ export async function getAnnouncements(): Promise<Announcement[]> {
 
 // ==================== ЗАПИСЬ ====================
 
+function employeeToSheetData(data: Partial<Employee>): Record<string, any> {
+  const fieldNames: Partial<Record<keyof Employee, string>> = {
+    id: 'ID',
+    personalNumber: 'Персональный номер',
+    fullName: 'ФИО',
+    status: 'Статус',
+    position: 'Должность',
+    hireDate: 'Дата найма',
+    phone: 'Телефон',
+    lastActivity: 'Последний вход',
+    note: 'Примечание',
+  };
+  const sheetData: Record<string, any> = {};
+  Object.entries(data).forEach(([key, value]) => {
+    if (value === undefined) return;
+    if (key === 'blocked' || key === 'shiftOpen') {
+      sheetData[key === 'blocked' ? 'Заблокирован' : 'Смена открыта'] = value ? 'ДА' : 'НЕТ';
+    } else if (key === 'password') {
+      sheetData['Пароль'] = value;
+      sheetData['Пароль (хэш)'] = value;
+    } else {
+      sheetData[fieldNames[key as keyof Employee] || key] = value;
+    }
+  });
+  return sheetData;
+}
+
 export async function addEmployee(employee: Partial<Employee>): Promise<void> {
-  await postData('addEmployee', employee);
+  await postData('addEmployee', employeeToSheetData(employee));
 }
 export async function updateEmployee(id: string, data: Partial<Employee>): Promise<void> {
-  await postData('updateEmployee', { id, data });
+  await postData('updateEmployee', { id, data: employeeToSheetData(data) });
 }
 export async function updateEmployeeShift(id: string, shiftOpen: boolean): Promise<void> {
   await postData('updateEmployeeShift', { id, shiftOpen });

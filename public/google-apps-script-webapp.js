@@ -200,7 +200,10 @@ function appendRow(sheetName, rowData) {
   
   const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
   const row = headers.map(h => rowData[h] !== undefined ? rowData[h] : '');
-  sheet.appendRow(row);
+  const textSafeRow = row.map(value =>
+    typeof value === 'string' && /^0\d+$/.test(value) ? "'" + value : value
+  );
+  sheet.appendRow(textSafeRow);
 }
 
 function updateRow(sheetName, id, updates) {
@@ -214,12 +217,14 @@ function updateRow(sheetName, id, updates) {
   
   for (let i = 1; i < data.length; i++) {
     if (data[i][idColumn] === id) {
+      const updatedRow = [...data[i]];
       Object.keys(updates).forEach(key => {
         const colIndex = headers.indexOf(key);
         if (colIndex !== -1) {
-          sheet.getRange(i + 1, colIndex + 1).setValue(updates[key]);
+          updatedRow[colIndex] = updates[key];
         }
       });
+      sheet.getRange(i + 1, 1, 1, headers.length).setValues([updatedRow]);
       break;
     }
   }
@@ -285,7 +290,34 @@ function getNomenclatureData() {
 }
 
 function addNomenclatureData(data) {
-  appendRow('Номенклатура', data);
+  const nomenclatureId = data['ID'] || data.id || 'NOM-' + Date.now();
+  const name = data['Название'] ?? data.name ?? '';
+  const now = new Date();
+  appendRow('Номенклатура', {
+    'ID': nomenclatureId,
+    'Название': name,
+    'Категория': data['Категория'] ?? data.category ?? '',
+    'Ед. измерения': data['Ед. измерения'] ?? data.unit ?? '',
+    'Производитель': data['Производитель'] ?? data.manufacturer ?? '',
+    'Количество в упаковке': data['Количество в упаковке'] ?? data.packageQuantity ?? 1,
+    'Актуальна': data['Актуальна'] ?? (data.active === false ? 'НЕТ' : 'ДА'),
+    'Дата создания': now,
+    'Примечание': data['Примечание'] ?? data.note ?? ''
+  });
+  const price = data['Цена за ед. (₽)'] ?? data.currentPrice;
+  if (price !== undefined) {
+    appendRow('Цены', {
+      'ID': 'PRICE-' + Date.now(),
+      'Номенклатура_ID': nomenclatureId,
+      'Название': name,
+      'Цена за ед. (₽)': price,
+      'Дата начала': now,
+      'Дата окончания': '',
+      'Кем изменено': data['Кем изменено'] ?? 'Руководитель',
+      'Дата изменения': now,
+      'Примечание': 'Цена при добавлении номенклатуры'
+    });
+  }
 }
 
 function updateNomenclatureData(id, updates) {

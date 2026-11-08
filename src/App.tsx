@@ -40,17 +40,18 @@ function useData() {
       if (updating) return;
       updating = true;
       try {
-        const [emps, messages] = await Promise.all([
-          gs.getEmployees(),
-          gs.getChatMessages(),
-        ]);
-        if (active) {
-          setEmployees(emps);
-          setChatMessages(current => messages.map(message => {
-            const localMessage = current.find(item => item.id === message.id);
-            return localMessage?.read && !message.read ? { ...message, read: true } : message;
-          }));
-        }
+        const employeesRequest = gs.getEmployees().then(emps => {
+          if (active) setEmployees(emps);
+        });
+        const messagesRequest = gs.getChatMessages().then(messages => {
+          if (active) {
+            setChatMessages(current => messages.map(message => {
+              const localMessage = current.find(item => item.id === message.id);
+              return localMessage?.read && !message.read ? { ...message, read: true } : message;
+            }));
+          }
+        });
+        await Promise.all([employeesRequest, messagesRequest]);
       } catch (err) {
         console.error('Ошибка автоматического обновления данных:', err);
       } finally {
@@ -2457,7 +2458,7 @@ function NomenclaturePage({ data }: { data: ReturnType<typeof useData> }) {
     const matchSearch = !searchLower || name.includes(searchLower);
     const matchCat = catFilter === 'all' || n.category === catFilter;
     return matchSearch && matchCat;
-  });
+  }).sort((a, b) => String(a.name ?? '').localeCompare(String(b.name ?? ''), 'ru', { sensitivity: 'base' }));
 
   return (
     <div className="space-y-6">
@@ -2577,12 +2578,9 @@ function NomenclaturePage({ data }: { data: ReturnType<typeof useData> }) {
         <AddNomenclatureModal
           onClose={() => setShowAddModal(false)}
           onAdd={async (item: gs.Nomenclature) => {
+            await gs.addNomenclature(item);
+            setNomenclature(current => [...current, item]);
             setShowAddModal(false);
-            setNomenclature([...nomenclature, item]);
-            gs.addNomenclature(item).catch(err => {
-              console.error('Ошибка добавления номенклатуры:', err);
-              alert('Ошибка при добавлении номенклатуры. Попробуйте ещё раз.');
-            });
           }}
         />
       )}
@@ -3234,6 +3232,8 @@ function EmployeesPage({ data }: { data: ReturnType<typeof useData> }) {
   const [showAdd, setShowAdd] = useState(false);
   const [editingEmployee, setEditingEmployee] = useState<gs.Employee | null>(null);
   const [selectedEmployee, setSelectedEmployee] = useState<gs.Employee | null>(null);
+  const [shiftUpdatingId, setShiftUpdatingId] = useState<string | null>(null);
+  const [blockUpdatingId, setBlockUpdatingId] = useState<string | null>(null);
   const now = new Date();
   const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 
@@ -3261,6 +3261,13 @@ function EmployeesPage({ data }: { data: ReturnType<typeof useData> }) {
     }
     seen.add(fullName);
     return true;
+  }).sort((a, b) => {
+    const aNumber = String(a.personalNumber ?? '').trim();
+    const bNumber = String(b.personalNumber ?? '').trim();
+    if (!aNumber && !bNumber) return 0;
+    if (!aNumber) return 1;
+    if (!bNumber) return -1;
+    return aNumber.localeCompare(bNumber, 'ru', { numeric: true });
   });
 
   const getArrival = (empId: string) => arrivals.filter(a => a.employeeId === empId && a.month === currentMonth).reduce((s, a) => s + a.amount, 0);
@@ -3270,46 +3277,35 @@ function EmployeesPage({ data }: { data: ReturnType<typeof useData> }) {
   }, 0);
   const getCalls = (empId: string) => new Set(expenses.filter(e => e.employeeId === empId && e.month === currentMonth).map(e => e.callId)).size;
 
-  const handleAdd = (form: { fullName: string; personalNumber: string; password: string; position: string; phone: string }) => {
-    // Проверка на дубликат ПЕРЕД добавлением
+  const handleAdd = async (form: { fullName: string; personalNumber: string; password: string; position: string; phone: string }) => {
     const trimmedNumber = form.personalNumber.trim();
-    const existingEmployee = employees.find(e => {
-      const existingNumber = String(e.personalNumber ?? '').trim();
-      return existingNumber === trimmedNumber;
-    });
-    
+    const existingEmployee = employees.find(e => String(e.personalNumber ?? '').trim() === trimmedNumber);
     if (existingEmployee) {
-      return false; // Возвращаем false, чтобы модальное окно показало ошибку
+      throw new Error(`Сотрудник с персональным номером "${trimmedNumber}" уже существует (${existingEmployee.fullName})`);
     }
-    
-    setShowAdd(false); // Закрываем окно сразу
-    
-    // Создаём нового сотрудника
+
+    const nextNumber = employees.reduce((max, employee) => {
+      const match = /^EMP-(\d+)$/.exec(employee.id);
+      return match ? Math.max(max, Number(match[1])) : max;
+    }, 0) + 1;
     const newEmployee: gs.Employee = {
-      id: `EMP-${String(employees.length + 1).padStart(3, '0')}`,
-      personalNumber: form.personalNumber,
-      fullName: form.fullName,
-      password: form.password,
+      id: `EMP-${String(nextNumber).padStart(3, '0')}`,
+      personalNumber: trimmedNumber,
+      fullName: form.fullName.trim(),
+      password: form.password.trim(),
       status: 'Неактивен',
       position: form.position,
       hireDate: new Date().toISOString().split('T')[0],
       blocked: false,
-      phone: form.phone,
+      phone: form.phone.trim(),
       lastActivity: '',
       note: '',
       shiftOpen: false,
     };
-    
-    // Добавляем в локальное состояние
-    setEmployees([...employees, newEmployee]);
-    
-    // Отправляем в Google Sheets в фоне
-    gs.addEmployee(newEmployee).catch(err => {
-      console.error('Ошибка добавления сотрудника:', err);
-      alert('Ошибка при добавлении сотрудника. Попробуйте ещё раз.');
-    });
-    
-    return true;
+
+    await gs.addEmployee(newEmployee);
+    setEmployees(current => [...current, newEmployee]);
+    setShowAdd(false);
   };
 
   // ✏️ Редактирование данных сотрудника
@@ -3319,32 +3315,38 @@ function EmployeesPage({ data }: { data: ReturnType<typeof useData> }) {
 
   // 🔒 Блокировка/разблокировка сотрудника
   const handleToggleBlock = async (id: string, block: boolean) => {
-    if (confirm(block ? 'Заблокировать сотрудника?\n\nСотрудник не сможет войти в систему.' : 'Разблокировать сотрудника?')) {
-      // Обновляем локальное состояние
-      setEmployees(employees.map(e => e.id === id ? { ...e, blocked: block } : e));
-      
-      // Отправляем в Google Sheets в фоне
-      gs.updateEmployee(id, { blocked: block }).catch(err => {
-        console.error('Ошибка блокировки сотрудника:', err);
-        alert('Ошибка при блокировке сотрудника. Попробуйте ещё раз.');
-      });
+    if (blockUpdatingId || !confirm(block ? 'Заблокировать сотрудника?\n\nСотрудник не сможет войти в систему.' : 'Разблокировать сотрудника?')) return;
+    setBlockUpdatingId(id);
+    const updates: Partial<gs.Employee> = block
+      ? { blocked: true, shiftOpen: false, status: 'Неактивен' }
+      : { blocked: false };
+    try {
+      await gs.updateEmployee(id, updates);
+      setEmployees(current => current.map(e => e.id === id ? { ...e, ...updates } : e));
+    } catch (err) {
+      console.error('Ошибка блокировки сотрудника:', err);
+      alert('Ошибка при блокировке сотрудника. Попробуйте ещё раз.');
+    } finally {
+      setBlockUpdatingId(null);
     }
   };
 
   // 🟢 Открытие/закрытие смены сотрудника
   const handleToggleShift = async (id: string, open: boolean) => {
-    const emp = employees.find(e => e.id === id);
-    if (!emp) return;
-    
-    // Обновляем локальное состояние
-    const updatedEmployee = { ...emp, shiftOpen: open, status: open ? 'Активен' : 'Неактивен' };
-    setEmployees(employees.map(e => e.id === id ? updatedEmployee : e));
-    
-    // Отправляем в Google Sheets в фоне
-    gs.updateEmployeeShift(id, open).catch(err => {
+    if (shiftUpdatingId) return;
+    setShiftUpdatingId(id);
+    try {
+      await gs.updateEmployeeShift(id, open);
+      setEmployees(current => current.map(e => e.id === id
+        ? { ...e, shiftOpen: open, status: open ? 'Активен' : 'Неактивен' }
+        : e
+      ));
+    } catch (err) {
       console.error('Ошибка изменения статуса смены:', err);
       alert('Ошибка при изменении статуса смены. Попробуйте ещё раз.');
-    });
+    } finally {
+      setShiftUpdatingId(null);
+    }
   };
 
   // 🚫 Увольнение — сотрудник уходит в архив, персональный номер освобождается
@@ -3452,7 +3454,8 @@ function EmployeesPage({ data }: { data: ReturnType<typeof useData> }) {
                       {emp.shiftOpen ? (
                         <button 
                           onClick={(e) => { e.stopPropagation(); handleToggleShift(emp.id, false); }}
-                          className="text-red-600 hover:text-red-800 text-lg"
+                          disabled={shiftUpdatingId === emp.id}
+                          className={`text-red-600 hover:text-red-800 text-lg ${shiftUpdatingId === emp.id ? 'opacity-50 cursor-wait' : ''}`}
                           title="🔴 Закрыть смену"
                         >
                           🔴
@@ -3460,7 +3463,8 @@ function EmployeesPage({ data }: { data: ReturnType<typeof useData> }) {
                       ) : (
                         <button 
                           onClick={(e) => { e.stopPropagation(); handleToggleShift(emp.id, true); }}
-                          className="text-green-600 hover:text-green-800 text-lg"
+                          disabled={shiftUpdatingId === emp.id}
+                          className={`text-green-600 hover:text-green-800 text-lg ${shiftUpdatingId === emp.id ? 'opacity-50 cursor-wait' : ''}`}
                           title="🟢 Открыть смену"
                         >
                           🟢
@@ -3469,7 +3473,8 @@ function EmployeesPage({ data }: { data: ReturnType<typeof useData> }) {
                       {emp.blocked ? (
                         <button 
                           onClick={(e) => { e.stopPropagation(); handleToggleBlock(emp.id, false); }}
-                          className="text-green-600 hover:text-green-800 text-lg"
+                          disabled={blockUpdatingId === emp.id}
+                          className={`text-green-600 hover:text-green-800 text-lg ${blockUpdatingId === emp.id ? 'opacity-50 cursor-wait' : ''}`}
                           title="🔓 Разблокировать сотрудника"
                         >
                           🔓
@@ -3477,7 +3482,8 @@ function EmployeesPage({ data }: { data: ReturnType<typeof useData> }) {
                       ) : (
                         <button 
                           onClick={(e) => { e.stopPropagation(); handleToggleBlock(emp.id, true); }}
-                          className="text-orange-600 hover:text-orange-800 text-lg"
+                          disabled={blockUpdatingId === emp.id}
+                          className={`text-orange-600 hover:text-orange-800 text-lg ${blockUpdatingId === emp.id ? 'opacity-50 cursor-wait' : ''}`}
                           title="🔒 Заблокировать сотрудника (например, потерял телефон)"
                         >
                           🔒
@@ -3522,7 +3528,7 @@ function EmployeesPage({ data }: { data: ReturnType<typeof useData> }) {
         )}
       </div>
       {showAdd && (
-        <AddEmployeeModal key={Date.now()} employees={employees} onClose={() => setShowAdd(false)} onAdd={handleAdd} />
+        <AddEmployeeModal employees={employees} onClose={() => setShowAdd(false)} onAdd={handleAdd} />
       )}
       {editingEmployee && (
         <EditEmployeeModal 
@@ -3589,42 +3595,32 @@ function EmployeesPage({ data }: { data: ReturnType<typeof useData> }) {
   );
 }
 
-function AddEmployeeModal({ employees, onClose, onAdd }: { employees: gs.Employee[]; onClose: () => void; onAdd: (form: any) => boolean }) {
+function AddEmployeeModal({ employees, onClose, onAdd }: { employees: gs.Employee[]; onClose: () => void; onAdd: (form: { fullName: string; personalNumber: string; password: string; position: string; phone: string }) => Promise<void> }) {
   const [form, setForm] = useState({ fullName: '', personalNumber: '', password: '', position: 'Врач', phone: '' });
   const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
+    if (saving) return;
     setError(null);
-    
-    // Проверка уникальности персонального номера
     const trimmedNumber = form.personalNumber.trim();
-    
-    if (!trimmedNumber) {
-      setError('Персональный номер не может быть пустым');
+    if (!form.fullName.trim() || !trimmedNumber || !form.password.trim()) {
+      setError('Заполните ФИО, персональный номер и пароль');
       return;
     }
-    
-    // Проверка на дубликат
-    const existingEmployee = employees.find(e => {
-      const existingNumber = String(e.personalNumber ?? '').trim();
-      return existingNumber === trimmedNumber;
-    });
-    
+    const existingEmployee = employees.find(e => String(e.personalNumber ?? '').trim() === trimmedNumber);
     if (existingEmployee) {
-      const errorMsg = `Сотрудник с персональным номером "${trimmedNumber}" уже существует (${existingEmployee.fullName})`;
-      setError(errorMsg);
-      return; // Не закрываем окно
+      setError(`Сотрудник с персональным номером "${trimmedNumber}" уже существует (${existingEmployee.fullName})`);
+      return;
     }
-    
-    const result = onAdd(form);
-    
-    if (!result) {
-      // Получаем имя существующего сотрудника для сообщения
-      const existingEmp = employees.find(e => String(e.personalNumber ?? '').trim() === trimmedNumber);
-      const errorMsg = existingEmp 
-        ? `Сотрудник с персональным номером "${trimmedNumber}" уже существует (${existingEmp.fullName})`
-        : `Сотрудник с персональным номером "${trimmedNumber}" уже существует`;
-      setError(errorMsg);
+
+    setSaving(true);
+    try {
+      await onAdd({ ...form, personalNumber: trimmedNumber });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось добавить сотрудника');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -3661,12 +3657,6 @@ function AddEmployeeModal({ employees, onClose, onAdd }: { employees: gs.Employe
                   : 'border-slate-300 focus:border-blue-500 focus:ring-blue-500/20'
               }`} 
             />
-            {error && (
-              <p className="text-xs text-red-600 mt-1 flex items-center gap-1">
-                <span>⚠️</span>
-                <span>Проверьте персональный номер</span>
-              </p>
-            )}
           </div>
           <div>
             <label className="text-sm text-slate-600 mb-1 block">Пароль *</label>
@@ -3687,9 +3677,9 @@ function AddEmployeeModal({ employees, onClose, onAdd }: { employees: gs.Employe
           </div>
         </div>
         <div className="p-6 border-t border-slate-200 flex justify-end gap-3">
-          <button onClick={onClose} className="px-4 py-2 rounded-lg text-slate-600 hover:bg-slate-100">Отмена</button>
-          <button onClick={handleSubmit} disabled={!form.fullName || !form.personalNumber || !form.password}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-300 rounded-lg text-white font-medium">Добавить</button>
+          <button onClick={onClose} disabled={saving} className="px-4 py-2 rounded-lg text-slate-600 hover:bg-slate-100 disabled:opacity-50">Отмена</button>
+          <button onClick={handleSubmit} disabled={saving || !form.fullName.trim() || !form.personalNumber.trim() || !form.password.trim()}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-300 rounded-lg text-white font-medium">{saving ? 'Добавление...' : 'Добавить'}</button>
         </div>
       </div>
     </div>
@@ -4019,39 +4009,48 @@ function AddNomenclatureModal({
     pricePerPackage: 0,
   });
   const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   // Автоматический расчет цены за единицу
   const pricePerUnit = form.packageQuantity > 0 ? form.pricePerPackage / form.packageQuantity : 0;
 
   const handleSubmit = async () => {
+    if (saving) return;
     setError(null);
-    
+
     if (!form.name.trim()) {
       setError('Наименование не может быть пустым');
       return;
     }
-    
+
     // Для категории "Оборудование" цена не обязательна
     if (form.category !== 'Оборудование' && form.pricePerPackage <= 0) {
       setError('Цена за упаковку должна быть больше 0');
       return;
     }
-    
+
     if (form.packageQuantity <= 0) {
       setError('Количество в упаковке должно быть больше 0');
       return;
     }
-    
-    await onAdd({
-      id: `NOM-${Date.now()}`,
-      name: form.name.trim(),
-      category: form.category,
-      unit: form.unit,
-      manufacturer: form.manufacturer.trim(),
-      active: true,
-      currentPrice: pricePerUnit,
-      packageQuantity: form.packageQuantity,
-    });
+
+    setSaving(true);
+    try {
+      await onAdd({
+        id: `NOM-${Date.now()}`,
+        name: form.name.trim(),
+        category: form.category,
+        unit: form.unit,
+        manufacturer: form.manufacturer.trim(),
+        active: true,
+        currentPrice: pricePerUnit,
+        packageQuantity: form.packageQuantity,
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось добавить номенклатуру');
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -4151,13 +4150,13 @@ function AddNomenclatureModal({
           </div>
         </div>
         <div className="p-6 border-t border-slate-200 flex justify-end gap-3">
-          <button onClick={onClose} className="px-4 py-2 rounded-lg text-slate-600 hover:bg-slate-100">Отмена</button>
+          <button onClick={onClose} disabled={saving} className="px-4 py-2 rounded-lg text-slate-600 hover:bg-slate-100 disabled:opacity-50">Отмена</button>
           <button 
             onClick={handleSubmit} 
-            disabled={!form.name || (form.category !== 'Оборудование' && form.pricePerPackage <= 0) || form.packageQuantity <= 0}
+            disabled={saving || !form.name.trim() || (form.category !== 'Оборудование' && form.pricePerPackage <= 0) || form.packageQuantity <= 0}
             className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-300 rounded-lg text-white font-medium"
           >
-            💾 Сохранить
+            {saving ? 'Сохранение...' : '💾 Сохранить'}
           </button>
         </div>
       </div>
