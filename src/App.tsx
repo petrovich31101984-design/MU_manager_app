@@ -3036,6 +3036,11 @@ function EditExpenseSheetModal({
   };
 
   const handleSubmit = () => {
+    const items = formData.items.map(item => {
+      const quantity = Number(item.quantity) || 0;
+      const pricePerUnit = Number(item.pricePerUnit) || 0;
+      return { ...item, quantity, pricePerUnit, total: quantity * pricePerUnit };
+    });
     const updatedSheet: gs.ExpenseSheet = {
       ...sheet,
       date: formData.date,
@@ -3046,8 +3051,8 @@ function EditExpenseSheetModal({
       callCategory: formData.callCategory,
       therapyName: formData.therapyName,
       therapyCost: formData.therapyCost,
-      items: formData.items,
-      totalAmount: totalAmount
+      items,
+      totalAmount: items.reduce((sum, item) => sum + item.total, 0)
     };
     onSave(updatedSheet);
   };

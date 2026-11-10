@@ -270,11 +270,33 @@ export async function getAuditLog(): Promise<AuditEntry[]> {
 }
 
 export async function getExpenseSheets(): Promise<ExpenseSheet[]> {
-  const data = await fetchData('getExpenseSheets');
+  const [data, nomenclature] = await Promise.all([
+    fetchData('getExpenseSheets'),
+    getNomenclature()
+  ]);
   return data.map((row: any) => {
-    let items = row.items || row['Позиции'] || row['Позиции (JSON)'] || [];
-    if (typeof items === 'string') { try { items = JSON.parse(items); } catch { items = []; } }
-    if (!Array.isArray(items)) items = [];
+    let rawItems = row.items || row['Позиции'] || row['Позиции (JSON)'] || [];
+    if (typeof rawItems === 'string') { try { rawItems = JSON.parse(rawItems); } catch { rawItems = []; } }
+    if (!Array.isArray(rawItems)) rawItems = [];
+    const items = rawItems.map((item: any): ExpenseItem => {
+      const quantity = Number(item.quantity ?? item['Количество']) || 0;
+      const nomenclatureId = String(item.nomenclatureId ?? item.id ?? item['Номенклатура_ID'] ?? '');
+      const itemName = String(item.name ?? item['Название'] ?? '');
+      const nomenclatureItem = nomenclature.find(item => item.id === nomenclatureId)
+        || nomenclature.find(item => itemName && item.name === itemName);
+      const storedPrice = Number(item.pricePerUnit ?? item.price ?? item['Цена за единицу'] ?? item['Цена за ед. (₽)']) || 0;
+      const storedTotal = Number(item.total ?? item.totalAmount ?? item['Сумма']) || 0;
+      const pricePerUnit = storedPrice || nomenclatureItem?.currentPrice || (quantity > 0 && storedTotal > 0 ? storedTotal / quantity : 0);
+      return {
+        nomenclatureId: nomenclatureItem?.id || nomenclatureId,
+        name: itemName || nomenclatureItem?.name || '',
+        category: String(item.category ?? item['Категория'] ?? nomenclatureItem?.category ?? ''),
+        quantity,
+        pricePerUnit,
+        total: quantity * pricePerUnit
+      };
+    });
+    const calculatedTotal = items.reduce((sum, item) => sum + item.total, 0);
     return {
       id: row['ID'] || '', employeeId: row['Сотрудник_ID'] || '',
       employeeName: row['Сотрудник'] || '', patientName: row['Пациент'] || '',
@@ -282,7 +304,7 @@ export async function getExpenseSheets(): Promise<ExpenseSheet[]> {
       date: row['Дата'] || '', month: row['Месяц'] || '',
       callCategory: row['Категория выезда'] || '', therapyName: row['Название терапии'] || '',
       therapyCost: parseFloat(row['Стоимость терапии'] || '0'),
-      items, totalAmount: parseFloat(row['Итого по препаратам'] || '0'),
+      items, totalAmount: calculatedTotal > 0 ? calculatedTotal : parseFloat(row['Итого по препаратам'] || '0'),
       archived: row['Архив'] === 'ДА',
     };
   });
