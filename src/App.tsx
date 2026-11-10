@@ -345,6 +345,17 @@ function ChatPage({ data }: { data: ReturnType<typeof useData> }) {
   
   // Фильтруем сотрудников: исключаем уволенных
   const activeEmployees = employees.filter(e => e.status !== 'Уволен');
+  const sortedActiveEmployees = [...activeEmployees].sort((a, b) => {
+    const aUnread = chatMessages.some(message => message.fromId === a.id && !message.read) ? 0 : 1;
+    const bUnread = chatMessages.some(message => message.fromId === b.id && !message.read) ? 0 : 1;
+    if (aUnread !== bUnread) return aUnread - bUnread;
+    const aNumber = String(a.personalNumber ?? '').trim();
+    const bNumber = String(b.personalNumber ?? '').trim();
+    if (!aNumber && !bNumber) return 0;
+    if (!aNumber) return 1;
+    if (!bNumber) return -1;
+    return aNumber.localeCompare(bNumber, 'ru', { numeric: true });
+  });
   
   const [selectedChat, setSelectedChat] = useState<string>('');
   const [newMessage, setNewMessage] = useState('');
@@ -510,7 +521,7 @@ function ChatPage({ data }: { data: ReturnType<typeof useData> }) {
             <h3 className="font-bold text-slate-800 text-sm">Диалоги</h3>
           </div>
           <div className="flex-1 overflow-y-auto">
-            {activeEmployees.map(emp => {
+            {sortedActiveEmployees.map(emp => {
               const status = getEmployeeStatus(emp);
               // Подсчёт непрочитанных сообщений от этого сотрудника
               const unreadCount = chatMessages.filter(m =>
