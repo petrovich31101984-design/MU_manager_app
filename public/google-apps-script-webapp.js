@@ -25,6 +25,8 @@ function doGet(e) {
         return jsonResponse(getPricesData());
       case 'getArrivals':
         return jsonResponse(getArrivalsData());
+      case 'getInitialStock':
+        return jsonResponse(readSheetData('Начальные остатки'));
       case 'getExpenses':
         return jsonResponse(getExpensesData());
       case 'getExpenseSheets':
@@ -200,10 +202,13 @@ function appendRow(sheetName, rowData) {
   
   const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
   const row = headers.map(h => rowData[h] !== undefined ? rowData[h] : '');
-  const textSafeRow = row.map(value =>
-    typeof value === 'string' && /^0\d+$/.test(value) ? "'" + value : value
-  );
-  sheet.appendRow(textSafeRow);
+  const targetRow = sheet.getLastRow() + 1;
+  row.forEach((value, colIndex) => {
+    if (typeof value === 'string' && /^0\d+$/.test(value)) {
+      sheet.getRange(targetRow, colIndex + 1).setNumberFormat('@');
+    }
+  });
+  sheet.appendRow(row);
 }
 
 function updateRow(sheetName, id, updates) {
@@ -222,6 +227,11 @@ function updateRow(sheetName, id, updates) {
         const colIndex = headers.indexOf(key);
         if (colIndex !== -1) {
           updatedRow[colIndex] = updates[key];
+        }
+      });
+      updatedRow.forEach((value, colIndex) => {
+        if (typeof value === 'string' && /^0\d+$/.test(value)) {
+          sheet.getRange(i + 1, colIndex + 1).setNumberFormat('@');
         }
       });
       sheet.getRange(i + 1, 1, 1, headers.length).setValues([updatedRow]);
@@ -321,7 +331,38 @@ function addNomenclatureData(data) {
 }
 
 function updateNomenclatureData(id, updates) {
-  updateRow('Номенклатура', id, updates);
+  const name = updates['Название'] ?? updates.name ?? '';
+  updateRow('Номенклатура', id, {
+    'Название': name,
+    'Категория': updates['Категория'] ?? updates.category ?? '',
+    'Ед. измерения': updates['Ед. измерения'] ?? updates.unit ?? '',
+    'Производитель': updates['Производитель'] ?? updates.manufacturer ?? '',
+    'Количество в упаковке': updates['Количество в упаковке'] ?? updates.packageQuantity ?? 1,
+    'Актуальна': updates['Актуальна'] ?? (updates.active === false ? 'НЕТ' : 'ДА')
+  });
+  const price = updates['Цена за ед. (₽)'] ?? updates.currentPrice;
+  if (price === undefined) return;
+  const activePrices = getPricesData().filter(row =>
+    String(row['Номенклатура_ID'] ?? '').trim() === String(id).trim() &&
+    !row['Дата окончания']
+  );
+  const currentPrice = activePrices[activePrices.length - 1];
+  if (currentPrice && Number(currentPrice['Цена за ед. (₽)']) === Number(price)) return;
+  const now = new Date();
+  activePrices.forEach(row => {
+    updateRow('Цены', row['ID'], { 'Дата окончания': now });
+  });
+  appendRow('Цены', {
+    'ID': 'PRICE-' + Date.now(),
+    'Номенклатура_ID': id,
+    'Название': name,
+    'Цена за ед. (₽)': price,
+    'Дата начала': now,
+    'Дата окончания': '',
+    'Кем изменено': updates['Кем изменено'] ?? 'Руководитель',
+    'Дата изменения': now,
+    'Примечание': 'Изменение цены номенклатуры'
+  });
 }
 
 function deleteNomenclatureData(id) {
@@ -340,18 +381,44 @@ function getArrivalsData() {
   return readSheetData('Приход');
 }
 
-function addArrivalData(data) {
-  if (data.items && Array.isArray(data.items)) {
-    data.items = JSON.stringify(data.items);
+function normalizeArrivalData(data) {
+  const normalized = { ...data };
+  const fieldMap = {
+    id: 'ID',
+    employeeId: 'Сотрудник_ID',
+    employeeName: 'ФИО сотрудника',
+    date: 'Дата',
+    month: 'Месяц',
+    amount: 'Сумма (₽)',
+    shifts: 'Количество смен',
+    addedBy: 'Кем внесено',
+    type: 'Тип',
+    comment: 'Комментарий'
+  };
+  Object.keys(fieldMap).forEach(key => {
+    if (data[key] !== undefined) normalized[fieldMap[key]] = data[key];
+  });
+  if (data.employeeName !== undefined) normalized['Сотрудник'] = data.employeeName;
+  if (data.archived !== undefined) normalized['Архив'] = data.archived ? 'ДА' : 'НЕТ';
+  const positions = data.items ?? data['Позиции'] ?? data['Позиции (JSON)'];
+  if (positions !== undefined) {
+    const serializedPositions = typeof positions === 'string' ? positions : JSON.stringify(positions);
+    normalized['Позиции'] = serializedPositions;
+    normalized['Позиции (JSON)'] = serializedPositions;
   }
-  appendRow('Приход', data);
+  return normalized;
+}
+
+function addArrivalData(data) {
+  const rowData = normalizeArrivalData(data);
+  rowData['ID'] = rowData['ID'] || 'ARR-' + Date.now();
+  rowData['Дата внесения'] = rowData['Дата внесения'] || new Date();
+  rowData['Архив'] = rowData['Архив'] || 'НЕТ';
+  appendRow('Приход', rowData);
 }
 
 function updateArrivalData(id, updates) {
-  if (updates.items && Array.isArray(updates.items)) {
-    updates.items = JSON.stringify(updates.items);
-  }
-  updateRow('Приход', id, updates);
+  updateRow('Приход', id, normalizeArrivalData(updates));
 }
 
 function deleteArrivalData(id) {
@@ -534,6 +601,7 @@ function setupDatabase() {
     'Сотрудники',
     'Номенклатура',
     'Цены',
+    'Начальные остатки',
     'Приход',
     'Расход',
     'Листы расхода',
@@ -549,6 +617,7 @@ function setupDatabase() {
     'Сотрудники': ['ID', 'Персональный номер', 'ФИО', 'Пароль', 'Статус', 'Должность', 'Дата найма', 'Заблокирован', 'Телефон', 'Последний вход', 'Примечание', 'Смена открыта'],
     'Номенклатура': ['ID', 'Название', 'Категория', 'Ед. измерения', 'Производитель', 'Актуальна', 'Количество в упаковке'],
     'Цены': ['ID', 'Номенклатура_ID', 'Цена за ед. (₽)', 'Дата начала', 'Дата окончания', 'Кем изменено'],
+    'Начальные остатки': ['ID', 'Сотрудник_ID', 'ФИО', 'Номенклатура_ID', 'Название', 'Количество', 'Ед. изм.', 'Дата', 'Кем внесено', 'Период', 'Примечание'],
     'Приход': ['ID', 'Сотрудник_ID', 'Сотрудник', 'Дата', 'Месяц', 'Сумма (₽)', 'Количество смен', 'Кем внесено', 'Тип', 'Комментарий', 'Позиции', 'Архив'],
     'Расход': ['ID', 'Сотрудник_ID', 'Дата внесения', 'Дата вызова', 'Месяц', 'Номенклатура_ID', 'Количество', 'Пациент ФИО', 'Пациент ДР', 'Вызов_ID'],
     'Листы расхода': ['ID', 'Сотрудник_ID', 'Сотрудник', 'Пациент', 'Дата рождения пациента', 'Дата', 'Месяц', 'Категория выезда', 'Название терапии', 'Стоимость терапии', 'Итого по препаратам', 'Позиции', 'Архив'],

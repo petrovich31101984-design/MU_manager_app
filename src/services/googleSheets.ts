@@ -94,6 +94,10 @@ export interface Arrival {
   archived?: boolean; employeeName?: string;
 }
 
+export interface InitialStock {
+  id: string; employeeId: string; nomenclatureId: string; quantity: number;
+}
+
 export interface Expense {
   id: string; employeeId: string; date: string; callDate: string; month: string;
   nomenclatureId: string; quantity: number; patientName: string; patientBirthDate: string; callId: string;
@@ -167,7 +171,7 @@ export async function getNomenclature(): Promise<Nomenclature[]> {
 export async function getArrivals(): Promise<Arrival[]> {
   const data = await fetchData('getArrivals');
   return data.map((row: any) => {
-    let items = row.items || row['Позиции'] || row['Items'] || [];
+    let items = row.items || row['Позиции'] || row['Позиции (JSON)'] || row['Items'] || [];
     if (typeof items === 'string') { try { items = JSON.parse(items); } catch { items = []; } }
     if (!Array.isArray(items)) items = [];
     return {
@@ -176,9 +180,19 @@ export async function getArrivals(): Promise<Arrival[]> {
       amount: parseFloat(row['Сумма (₽)'] || '0'), shifts: parseInt(row['Количество смен'] || '0'),
       addedBy: row['Кем внесено'] || '', type: row['Тип'] || 'Плановый',
       comment: row['Комментарий'] || '', items, archived: row['Архив'] === 'ДА',
-      employeeName: row['Сотрудник'] || '',
+      employeeName: row['ФИО сотрудника'] || row['Сотрудник'] || '',
     };
   });
+}
+
+export async function getInitialStock(): Promise<InitialStock[]> {
+  const data = await fetchData('getInitialStock');
+  return data.map((row: any) => ({
+    id: row['ID'] || '',
+    employeeId: String(row['Сотрудник_ID'] || '').trim(),
+    nomenclatureId: String(row['Номенклатура_ID'] || '').trim(),
+    quantity: Number(row['Количество']) || 0,
+  }));
 }
 
 export async function getExpenses(): Promise<Expense[]> {
@@ -257,16 +271,21 @@ export async function getAuditLog(): Promise<AuditEntry[]> {
 
 export async function getExpenseSheets(): Promise<ExpenseSheet[]> {
   const data = await fetchData('getExpenseSheets');
-  return data.map((row: any) => ({
-    id: row['ID'] || '', employeeId: row['Сотрудник_ID'] || '',
-    employeeName: row['Сотрудник'] || '', patientName: row['Пациент'] || '',
-    patientBirthDate: row['Дата рождения пациента'] || '',
-    date: row['Дата'] || '', month: row['Месяц'] || '',
-    callCategory: row['Категория выезда'] || '', therapyName: row['Название терапии'] || '',
-    therapyCost: parseFloat(row['Стоимость терапии'] || '0'),
-    items: row.items || [], totalAmount: parseFloat(row['Итого по препаратам'] || '0'),
-    archived: row['Архив'] === 'ДА',
-  }));
+  return data.map((row: any) => {
+    let items = row.items || row['Позиции'] || row['Позиции (JSON)'] || [];
+    if (typeof items === 'string') { try { items = JSON.parse(items); } catch { items = []; } }
+    if (!Array.isArray(items)) items = [];
+    return {
+      id: row['ID'] || '', employeeId: row['Сотрудник_ID'] || '',
+      employeeName: row['Сотрудник'] || '', patientName: row['Пациент'] || '',
+      patientBirthDate: row['Дата рождения пациента'] || '',
+      date: row['Дата'] || '', month: row['Месяц'] || '',
+      callCategory: row['Категория выезда'] || '', therapyName: row['Название терапии'] || '',
+      therapyCost: parseFloat(row['Стоимость терапии'] || '0'),
+      items, totalAmount: parseFloat(row['Итого по препаратам'] || '0'),
+      archived: row['Архив'] === 'ДА',
+    };
+  });
 }
 
 export async function getAnnouncements(): Promise<Announcement[]> {
@@ -415,7 +434,7 @@ export interface PriceHistory {
 }
 
 export async function getPriceHistory(nomenclatureId: string): Promise<PriceHistory[]> {
-  const data = await fetchData('getPriceHistory');
+  const data = await fetchData('getPrices');
   return data
     .filter((row: any) => row['Номенклатура_ID'] === nomenclatureId)
     .map((row: any) => ({

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, Component, type ReactNode } from 'react';
+import { useState, useEffect, useCallback, useRef, Component, type ReactNode } from 'react';
 import * as gs from './services/googleSheets';
 
 // ============ ХУК ДЛЯ РАБОТЫ С ДАННЫМИ ============
@@ -6,6 +6,7 @@ function useData() {
   const [employees, setEmployees] = useState<gs.Employee[]>([]);
   const [nomenclature, setNomenclature] = useState<gs.Nomenclature[]>([]);
   const [arrivals, setArrivals] = useState<gs.Arrival[]>([]);
+  const [initialStocks, setInitialStocks] = useState<gs.InitialStock[]>([]);
   const [expenses, setExpenses] = useState<gs.Expense[]>([]);
   const [expenseSheets, setExpenseSheets] = useState<gs.ExpenseSheet[]>([]);
   const [returns, setReturns] = useState<gs.ReturnOperation[]>([]);
@@ -19,11 +20,11 @@ function useData() {
     setLoading(true);
     setError(null);
     try {
-      const [emps, noms, arrs, exps, expSheets, rets, msgs, anns, logs] = await Promise.all([
-        gs.getEmployees(), gs.getNomenclature(), gs.getArrivals(),
+      const [emps, noms, arrs, stocks, exps, expSheets, rets, msgs, anns, logs] = await Promise.all([
+        gs.getEmployees(), gs.getNomenclature(), gs.getArrivals(), gs.getInitialStock(),
         gs.getExpenses(), gs.getExpenseSheets(), gs.getReturns(), gs.getChatMessages(), gs.getAnnouncements(), gs.getAuditLog(),
       ]);
-      setEmployees(emps); setNomenclature(noms); setArrivals(arrs);
+      setEmployees(emps); setNomenclature(noms); setArrivals(arrs); setInitialStocks(stocks);
       setExpenses(exps); setExpenseSheets(expSheets); setReturns(rets); setChatMessages(msgs); setAnnouncements(anns); setAuditLog(logs);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Ошибка загрузки');
@@ -70,7 +71,7 @@ function useData() {
 
   return {
     employees, setEmployees, nomenclature, setNomenclature,
-    arrivals, setArrivals, expenses, setExpenses, expenseSheets, setExpenseSheets,
+    arrivals, setArrivals, initialStocks, setInitialStocks, expenses, setExpenses, expenseSheets, setExpenseSheets,
     returns, setReturns, chatMessages, setChatMessages, announcements, setAnnouncements,
     auditLog, setAuditLog, loading, error, refresh,
   };
@@ -786,14 +787,31 @@ function ArrivalCardModal({
   onAdd: (form: any) => void 
 }) {
   type ArrivalItem = { nomenclatureId: string; quantity: number; price: number; total: number };
-  
+  const sortedEmployees = [...employees].sort((a, b) => {
+    const aNumber = String(a.personalNumber ?? '').trim();
+    const bNumber = String(b.personalNumber ?? '').trim();
+    if (!aNumber && !bNumber) return 0;
+    if (!aNumber) return 1;
+    if (!bNumber) return -1;
+    return aNumber.localeCompare(bNumber, 'ru', { numeric: true });
+  });
+
   const [form, setForm] = useState({
-    employeeId: initialData?.employeeId || employees[0]?.id || '',
+    employeeId: initialData?.employeeId || sortedEmployees[0]?.id || '',
     date: initialData?.date || new Date().toISOString().split('T')[0],
     items: ((initialData as any)?.items || []) as ArrivalItem[]
   });
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const selectedItemsRef = useRef<HTMLDivElement>(null);
+  const previousItemsCount = useRef(form.items.length);
+
+  useEffect(() => {
+    if (form.items.length > previousItemsCount.current && selectedItemsRef.current) {
+      selectedItemsRef.current.scrollTo({ top: selectedItemsRef.current.scrollHeight, behavior: 'smooth' });
+    }
+    previousItemsCount.current = form.items.length;
+  }, [form.items.length]);
 
   const filteredNomenclature = nomenclature.filter(n => {
     const matchesCategory = selectedCategory === 'all' || n.category === selectedCategory;
@@ -890,7 +908,7 @@ function ArrivalCardModal({
                 onChange={e => setForm({ ...form, employeeId: e.target.value })}
                 className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-slate-800 focus:outline-none focus:border-blue-500"
               >
-                {employees.map(emp => <option key={emp.id} value={emp.id}>{emp.fullName}</option>)}
+                {sortedEmployees.map(emp => <option key={emp.id} value={emp.id}>{emp.fullName}</option>)}
               </select>
             </div>
           </div>
@@ -944,7 +962,7 @@ function ArrivalCardModal({
 
           {/* Поиск и список номенклатуры */}
           <div className="bg-slate-50 rounded-lg p-4 border border-slate-200">
-            <h4 className="text-sm font-semibold text-slate-700 mb-3">Доступные позиции</h4>
+            <h4 className="text-sm font-semibold text-slate-700 mb-3">Доступные позиции в номенклатуре</h4>
             <input
               type="text"
               placeholder="Поиск по наименованию..."
@@ -973,9 +991,10 @@ function ArrivalCardModal({
           {form.items.length > 0 && (
             <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
               <div className="p-4 bg-slate-50 border-b border-slate-200">
-                <h4 className="text-sm font-semibold text-slate-700">Выбранные позиции</h4>
+                <h4 className="text-sm font-semibold text-slate-700">Выдаётся сотруднику</h4>
               </div>
-              <table className="w-full table-fixed">
+              <div ref={selectedItemsRef} className="h-[330px] overflow-y-auto">
+                <table className="w-full table-fixed">
                 <colgroup>
                   <col style={{ width: '50%' }} />
                   <col style={{ width: '120px' }} />
@@ -1017,7 +1036,8 @@ function ArrivalCardModal({
                     <td className="px-4 py-3 text-right text-lg text-emerald-600">{totalAmount.toLocaleString('ru-RU')} ₽</td>
                   </tr>
                 </tfoot>
-              </table>
+                </table>
+              </div>
             </div>
           )}
         </div>
@@ -2049,7 +2069,7 @@ function ExpensePage({ data }: { data: ReturnType<typeof useData> }) {
 
 // ============ ОСТАТОК У СОТРУДНИКА ============
 function BalancePage({ data }: { data: ReturnType<typeof useData> }) {
-  const { employees, nomenclature, arrivals, expenseSheets } = data;
+  const { employees, nomenclature, arrivals, initialStocks, expenseSheets } = data;
   
   // Получаем всех сотрудников, кроме уволенных (включая Неактивен, Отпуск и т.д.)
   // Убираем дубликаты по ФИО — оставляем только первую запись с таким ФИО
@@ -2135,6 +2155,10 @@ function BalancePage({ data }: { data: ReturnType<typeof useData> }) {
 
   // Функция для расчёта остатка по сотруднику и номенклатуре
   const calculateBalance = (employeeId: string, nomenclatureId: string): number => {
+    const totalInitialStock = initialStocks
+      .filter(stock => stock.employeeId === employeeId && stock.nomenclatureId === nomenclatureId)
+      .reduce((sum, stock) => sum + stock.quantity, 0);
+
     // Считаем приходы (только неархивированные и существующие)
     let totalArrival = 0;
     arrivals.forEach(arrival => {
@@ -2194,7 +2218,7 @@ function BalancePage({ data }: { data: ReturnType<typeof useData> }) {
       }
     });
 
-    return totalArrival - totalExpense;
+    return totalInitialStock + totalArrival - totalExpense;
   };
 
   // Функция для расчёта общего количества по номенклатуре
@@ -2336,6 +2360,11 @@ function ViewArrivalModal({
   onClose: () => void;
 }) {
   const items = (arrival as any).items || [];
+  const sortedItems = [...items].sort((a: any, b: any) => {
+    const aIsPku = nomenclature.find(n => n.id === a.nomenclatureId)?.category === 'ЛС ПКУ';
+    const bIsPku = nomenclature.find(n => n.id === b.nomenclatureId)?.category === 'ЛС ПКУ';
+    return Number(bIsPku) - Number(aIsPku);
+  });
 
   return (
     <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50 p-4">
@@ -2387,11 +2416,12 @@ function ViewArrivalModal({
                   </tr>
                 </thead>
                 <tbody>
-                  {items.map((item: any) => {
+                  {sortedItems.map((item: any) => {
                     const nom = nomenclature.find(n => n.id === item.nomenclatureId);
+                    const isPku = nom?.category === 'ЛС ПКУ';
                     return (
                       <tr key={item.nomenclatureId} className="border-b border-slate-100">
-                        <td className="px-4 py-3 text-sm text-slate-800 truncate">{nom?.name}</td>
+                        <td className={`px-4 py-3 text-sm truncate ${isPku ? 'text-orange-600 font-medium' : 'text-slate-800'}`}>{nom?.name}</td>
                         <td className="px-4 py-3 text-center text-sm text-slate-800">{item.quantity}</td>
                         <td className="px-4 py-3 text-right text-sm text-slate-700">{item.price.toLocaleString('ru-RU')} ₽</td>
                         <td className="px-4 py-3 text-right text-sm font-semibold text-emerald-600">{item.total.toLocaleString('ru-RU')} ₽</td>
@@ -2710,7 +2740,7 @@ function ViewNomenclatureCardModal({
                       <div key={record.id || index} className="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-lg">
                         <div className="flex-1">
                           <div className="text-sm font-semibold text-slate-800">
-                            {record.price.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₽
+                            {(record.price * (item.packageQuantity || 1)).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₽
                           </div>
                           <div className="text-xs text-slate-500">
                             {new Date(record.date).toLocaleDateString('ru-RU')} • {record.changedBy}
@@ -4441,7 +4471,7 @@ export default function App() {
 
 // ============ DASHBOARD ============
 function Dashboard({ data }: { data: ReturnType<typeof useData> }) {
-  const { employees, arrivals, expenseSheets, returns } = data;
+  const { employees, nomenclature, arrivals, initialStocks, expenseSheets, returns } = data;
   const now = new Date();
   const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
   
@@ -4467,13 +4497,22 @@ function Dashboard({ data }: { data: ReturnType<typeof useData> }) {
   const getExpenseCount = (empId: string, month: string) => expenseSheets.filter(s => s.employeeId === empId && s.month === month && !s.archived).length;
 
   const calculateEmployeeBalanceValue = (employeeId: string): number => {
-    const totalArrival = arrivals
-      .filter(arrival => arrival.employeeId === employeeId && !arrival.archived)
-      .reduce((sum, arrival) => sum + arrival.amount, 0);
-    const totalExpense = expenseSheets
-      .filter(sheet => sheet.employeeId === employeeId && !sheet.archived)
-      .reduce((sum, sheet) => sum + sheet.totalAmount, 0);
-    return totalArrival - totalExpense;
+    return nomenclature.reduce((total, nomenclatureItem) => {
+      const initialQuantity = initialStocks
+        .filter(stock => stock.employeeId === employeeId && stock.nomenclatureId === nomenclatureItem.id)
+        .reduce((sum, stock) => sum + stock.quantity, 0);
+      const arrivalQuantity = arrivals
+        .filter(arrival => arrival.employeeId === employeeId && !arrival.archived)
+        .reduce((sum, arrival) => sum + (arrival.items || [])
+          .filter(item => item.nomenclatureId === nomenclatureItem.id)
+          .reduce((itemSum, item) => itemSum + (Number(item.quantity) || 0), 0), 0);
+      const expenseQuantity = expenseSheets
+        .filter(sheet => sheet.employeeId === employeeId && !sheet.archived)
+        .reduce((sum, sheet) => sum + sheet.items
+          .filter(item => item.nomenclatureId === nomenclatureItem.id)
+          .reduce((itemSum, item) => itemSum + (Number(item.quantity) || 0), 0), 0);
+      return total + (initialQuantity + arrivalQuantity - expenseQuantity) * nomenclatureItem.currentPrice;
+    }, 0);
   };
 
   const totalArrivalLastMonth = activeEmployees.reduce((s, e) => s + getArrival(e.id, lastMonth), 0);
@@ -4661,9 +4700,12 @@ function Dashboard({ data }: { data: ReturnType<typeof useData> }) {
               {employees
                 .filter(e => e.status !== 'Уволен')
                 .sort((a, b) => {
-                  if (a.status === 'Активен' && b.status !== 'Активен') return -1;
-                  if (a.status !== 'Активен' && b.status === 'Активен') return 1;
-                  return 0;
+                  const aNumber = String(a.personalNumber ?? '').trim();
+                  const bNumber = String(b.personalNumber ?? '').trim();
+                  if (!aNumber && !bNumber) return 0;
+                  if (!aNumber) return 1;
+                  if (!bNumber) return -1;
+                  return aNumber.localeCompare(bNumber, 'ru', { numeric: true });
                 })
                 .map(emp => {
                   const arr = getArrival(emp.id, lastMonth);
