@@ -1937,10 +1937,8 @@ function ExpensePage({ data }: { data: ReturnType<typeof useData> }) {
   const { employees, expenseSheets, setExpenseSheets, nomenclature } = data;
   const [editingSheet, setEditingSheet] = useState<gs.ExpenseSheet | null>(null);
   const [selectedMonth, setSelectedMonth] = useState(() => {
-    // По умолчанию показываем предыдущий месяц
     const now = new Date();
-    const previousMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-    return `${previousMonth.getFullYear()}-${String(previousMonth.getMonth() + 1).padStart(2, '0')}`;
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
   });
 
   // Фильтрация по месяцу (для отображения)
