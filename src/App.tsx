@@ -340,7 +340,11 @@ function SettingsPage({ data }: { data: ReturnType<typeof useData> }) {
 
 
 // ============ ЧАТ ============
-function ChatPage({ data }: { data: ReturnType<typeof useData> }) {
+function ChatPage({ data, focusEmployeeId, onFocusHandled }: {
+  data: ReturnType<typeof useData>;
+  focusEmployeeId?: string | null;
+  onFocusHandled?: () => void;
+}) {
   const { chatMessages, employees, announcements } = data;
   
   // Фильтруем сотрудников: исключаем уволенных
@@ -358,6 +362,29 @@ function ChatPage({ data }: { data: ReturnType<typeof useData> }) {
   });
   
   const [selectedChat, setSelectedChat] = useState<string>('');
+
+  // Помечаем все сообщения от сотрудника как прочитанные (при открытии диалога)
+  const markEmployeeMessagesRead = (employeeId: string) => {
+    const updatedMessages = chatMessages.map(m => {
+      if (m.fromId === employeeId && !m.read) {
+        gs.updateChatMessage(m.id, { read: true }).catch(err => {
+          console.error('Ошибка обновления статуса сообщения:', err);
+        });
+        return { ...m, read: true };
+      }
+      return m;
+    });
+    data.setChatMessages(updatedMessages);
+  };
+
+  // Переход из блока «Сообщения» на панели руководителя: сразу открываем диалог с сотрудником
+  useEffect(() => {
+    if (!focusEmployeeId) return;
+    setSelectedChat(focusEmployeeId);
+    markEmployeeMessagesRead(focusEmployeeId);
+    onFocusHandled?.();
+  }, [focusEmployeeId]);
+
   const [newMessage, setNewMessage] = useState('');
   const [showCreateAnnouncement, setShowCreateAnnouncement] = useState(false);
   const [editingAnnouncement, setEditingAnnouncement] = useState<gs.Announcement | null>(null);
@@ -534,17 +561,7 @@ function ChatPage({ data }: { data: ReturnType<typeof useData> }) {
 
                 // Помечаем все сообщения от этого сотрудника как прочитанные
                 if (selectedChat !== emp.id) {
-                  const updatedMessages = chatMessages.map(m => {
-                    if (m.fromId === emp.id && !m.read) {
-                      // Обновляем в Google Sheets
-                      gs.updateChatMessage(m.id, { read: true }).catch(err => {
-                        console.error('Ошибка обновления статуса сообщения:', err);
-                      });
-                      return { ...m, read: true };
-                    }
-                    return m;
-                  });
-                  data.setChatMessages(updatedMessages);
+                  markEmployeeMessagesRead(emp.id);
                 }
               };
               
@@ -1348,7 +1365,8 @@ function ExpenseSheetView({
   onArchive,
   onEdit,
   onRestore,
-  isArchived = false
+  isArchived = false,
+  highlighted = false
 }: {
   sheet: gs.ExpenseSheet;
   employees: gs.Employee[];
@@ -1356,6 +1374,7 @@ function ExpenseSheetView({
   onEdit: (sheet: gs.ExpenseSheet) => void;
   onRestore?: (id: string) => void;
   isArchived?: boolean;
+  highlighted?: boolean;
 }) {
   const emp = employees.find(e => e.id === sheet.employeeId);
   const limit = sheet.therapyCost > 0 ? (sheet.totalAmount * 100) / sheet.therapyCost : 0;
@@ -1420,7 +1439,12 @@ function ExpenseSheetView({
   };
 
   return (
-    <div className="bg-white border border-slate-300 rounded-lg shadow-sm overflow-hidden">
+    <div
+      id={`expense-sheet-${sheet.id}`}
+      className={`bg-white border rounded-lg shadow-sm overflow-hidden scroll-mt-6 transition-shadow duration-500 ${
+        highlighted ? 'border-red-400 ring-4 ring-red-300' : 'border-slate-300'
+      }`}
+    >
       {/* Шапка - светло-серый цвет */}
       <div className="bg-slate-100 px-6 py-4 border-b border-slate-300">
         <div className="flex justify-between items-start mb-4">
@@ -1962,13 +1986,48 @@ function ArchivePage({ data }: { data: ReturnType<typeof useData> }) {
   );
 }
 
-function ExpensePage({ data }: { data: ReturnType<typeof useData> }) {
+function ExpensePage({ data, focusSheetId, onFocusHandled }: {
+  data: ReturnType<typeof useData>;
+  focusSheetId?: string | null;
+  onFocusHandled?: () => void;
+}) {
   const { employees, expenseSheets, setExpenseSheets, nomenclature } = data;
   const [editingSheet, setEditingSheet] = useState<gs.ExpenseSheet | null>(null);
   const [selectedMonth, setSelectedMonth] = useState(() => {
+    const focusMonth = expenseSheets.find(s => s.id === focusSheetId)?.month;
+    if (focusMonth) return focusMonth;
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
   });
+  const [highlightedSheetId, setHighlightedSheetId] = useState<string | null>(null);
+
+  // Переход из уведомления: месяц листа → прокрутка к листу → подсветка на несколько секунд
+  useEffect(() => {
+    if (!focusSheetId) return;
+    const target = expenseSheets.find(s => s.id === focusSheetId);
+    onFocusHandled?.();
+    if (!target) return;
+    setSelectedMonth(target.month);
+    setHighlightedSheetId(target.id);
+  }, [focusSheetId]);
+
+  // Прокрутка и снятие подсветки — отдельно, чтобы сброс focusSheetId не отменял таймеры
+  useEffect(() => {
+    if (!highlightedSheetId) return;
+    const element = () => document.getElementById(`expense-sheet-${highlightedSheetId}`);
+    const scrollTimer = window.setTimeout(() => {
+      element()?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 100);
+    // Плавная прокрутка может прерваться перерисовкой — тогда переходим к листу сразу
+    const fallbackTimer = window.setTimeout(() => {
+      const rect = element()?.getBoundingClientRect();
+      if (rect && (rect.top < 0 || rect.top > window.innerHeight / 2)) {
+        element()?.scrollIntoView({ behavior: 'auto', block: 'start' });
+      }
+    }, 900);
+    const clearTimer = window.setTimeout(() => setHighlightedSheetId(null), 4000);
+    return () => { [scrollTimer, fallbackTimer, clearTimer].forEach(t => window.clearTimeout(t)); };
+  }, [highlightedSheetId]);
 
   // Фильтрация по месяцу (для отображения)
   const filteredSheets = expenseSheets.filter(s => s.month === selectedMonth && !s.archived);
@@ -2062,12 +2121,13 @@ function ExpensePage({ data }: { data: ReturnType<typeof useData> }) {
           </div>
         ) : (
           filteredSheets.map(sheet => (
-            <ExpenseSheetView 
-              key={sheet.id} 
-              sheet={sheet} 
+            <ExpenseSheetView
+              key={sheet.id}
+              sheet={sheet}
               employees={employees}
               onArchive={handleArchiveSheet}
               onEdit={handleEditSheet}
+              highlighted={sheet.id === highlightedSheetId}
             />
           ))
         )}
@@ -4296,6 +4356,18 @@ function SetupPage() {
 // ============ ГЛАВНОЕ ПРИЛОЖЕНИЕ ============
 export default function App() {
   const [currentPage, setCurrentPage] = useState<Page>('dashboard');
+  // Лист расхода, к которому нужно перейти (из уведомления на панели руководителя)
+  const [focusSheetId, setFocusSheetId] = useState<string | null>(null);
+  const openExpenseSheet = (sheetId: string) => {
+    setFocusSheetId(sheetId);
+    setCurrentPage('expense');
+  };
+  // Сотрудник, диалог с которым нужно открыть (из блока «Сообщения» на панели руководителя)
+  const [focusChatEmployeeId, setFocusChatEmployeeId] = useState<string | null>(null);
+  const openChat = (employeeId: string) => {
+    setFocusChatEmployeeId(employeeId);
+    setCurrentPage('chat');
+  };
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const data = useData();
 
@@ -4341,14 +4413,14 @@ export default function App() {
 
   const renderPage = () => {
     switch (currentPage) {
-      case 'dashboard': return <Dashboard data={data} />;
+      case 'dashboard': return <Dashboard data={data} onOpenSheet={openExpenseSheet} onOpenChat={openChat} />;
       case 'employees': return <EmployeesPage data={data} />;
       case 'nomenclature': return <NomenclaturePage data={data} />;
       case 'arrival': return <ArrivalPage data={data} />;
-      case 'expense': return <ExpensePage data={data} />;
+      case 'expense': return <ExpensePage data={data} focusSheetId={focusSheetId} onFocusHandled={() => setFocusSheetId(null)} />;
       case 'balance': return <BalancePage data={data} />;
       case 'archive': return <ArchivePage data={data} />;
-      case 'chat': return <ChatPage data={data} />;
+      case 'chat': return <ChatPage data={data} focusEmployeeId={focusChatEmployeeId} onFocusHandled={() => setFocusChatEmployeeId(null)} />;
       case 'reports': return <ReportsPage data={data} />;
       case 'audit': return <AuditPage data={data} />;
       case 'settings': return <SettingsPage data={data} />;
@@ -4425,7 +4497,11 @@ export default function App() {
 }
 
 // ============ DASHBOARD ============
-function Dashboard({ data }: { data: ReturnType<typeof useData> }) {
+function Dashboard({ data, onOpenSheet, onOpenChat }: {
+  data: ReturnType<typeof useData>;
+  onOpenSheet: (sheetId: string) => void;
+  onOpenChat: (employeeId: string) => void;
+}) {
   const { employees, arrivals, expenseSheets, returns } = data;
   const now = new Date();
   const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
@@ -4514,6 +4590,7 @@ function Dashboard({ data }: { data: ReturnType<typeof useData> }) {
     .sort((a, b) => b.date.localeCompare(a.date))
     .map(msg => ({
       id: msg.id,
+      fromId: msg.fromId,
       from: msg.fromName || 'Сотрудник',
       text: msg.text,
       time: msg.date ? new Date(msg.date).toLocaleString('ru-RU') : '',
@@ -4590,9 +4667,11 @@ function Dashboard({ data }: { data: ReturnType<typeof useData> }) {
               notifications.map(notif => (
                 <div
                   key={notif.id}
-                  className={`p-4 rounded-lg border ${
+                  onClick={() => { handleNotificationClick(notif.id); onOpenSheet(notif.id); }}
+                  title="Открыть лист расхода"
+                  className={`p-4 rounded-lg border cursor-pointer transition-shadow hover:shadow-md ${
                     notif.type === 'warning' ? 'bg-yellow-50 border-yellow-200' :
-                    notif.type === 'alert' ? 'bg-red-50 border-red-200' :
+                    notif.type === 'alert' ? 'bg-red-50 border-red-200 hover:border-red-300' :
                     'bg-blue-50 border-blue-200'
                   }`}
                 >
@@ -4601,8 +4680,9 @@ function Dashboard({ data }: { data: ReturnType<typeof useData> }) {
                       <p className="text-sm text-slate-800 font-medium">{notif.text}</p>
                       <p className="text-xs text-slate-500 mt-1">{notif.time}</p>
                     </div>
-                    <span 
-                      onClick={() => handleNotificationClick(notif.id)}
+                    <span
+                      title="Скрыть уведомление"
+                      onClick={(event) => { event.stopPropagation(); handleNotificationClick(notif.id); }}
                       className="text-red-500 text-lg cursor-pointer hover:text-red-700 transition-colors"
                     >×</span>
                   </div>
@@ -4630,7 +4710,9 @@ function Dashboard({ data }: { data: ReturnType<typeof useData> }) {
               messages.map(msg => (
                 <div
                   key={msg.id}
-                  className="p-4 rounded-lg border border-slate-200 bg-slate-50"
+                  onClick={() => onOpenChat(msg.fromId)}
+                  title="Открыть диалог с сотрудником"
+                  className="p-4 rounded-lg border border-slate-200 bg-slate-50 cursor-pointer transition-shadow hover:shadow-md hover:border-blue-300"
                 >
                   <div className="flex items-start gap-3">
                     <div className="w-10 h-10 bg-blue-500 rounded-full flex items-center justify-center text-white font-bold text-sm shrink-0">
@@ -4641,8 +4723,9 @@ function Dashboard({ data }: { data: ReturnType<typeof useData> }) {
                       <p className="text-sm text-slate-600 mt-1">{msg.text}</p>
                       <p className="text-xs text-slate-500 mt-1">{msg.time}</p>
                     </div>
-                    <span 
-                      onClick={() => handleMessageClick(msg.id)}
+                    <span
+                      title="Отметить прочитанным"
+                      onClick={(event) => { event.stopPropagation(); handleMessageClick(msg.id); }}
                       className="text-red-500 text-lg cursor-pointer hover:text-red-700 transition-colors"
                     >×</span>
                   </div>
