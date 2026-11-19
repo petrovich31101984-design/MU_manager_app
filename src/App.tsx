@@ -669,17 +669,35 @@ function ChatPage({ data }: { data: ReturnType<typeof useData> }) {
 
 // ============ ОТЧЁТЫ ============
 function ReportsPage({ data }: { data: ReturnType<typeof useData> }) {
-  const { employees, arrivals, expenses, nomenclature, expenseSheets } = data;
+  const { arrivals, expenseSheets } = data;
   const [selectedMonth, setSelectedMonth] = useState(() => {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
   });
 
-  const reportData = employees.filter(e => e.status !== 'Уволен').map(emp => {
-    const expenseSheetsCount = expenseSheets.filter(s => s.employeeId === emp.id && s.month === selectedMonth && !s.archived).length;
-    const arrival = arrivals.filter(a => a.employeeId === emp.id && a.month === selectedMonth && !a.archived).reduce((s, a) => s + a.amount, 0);
-    const expense = expenseSheets.filter(s => s.employeeId === emp.id && s.month === selectedMonth && !s.archived).reduce((s, sheet) => s + sheet.totalAmount, 0);
-    return { emp, expenseSheetsCount, arrival, expense, balance: arrival - expense };
+  // Тот же список сотрудников и расчёт остатков, что в «Остаток у сотрудника» и на панели руководителя
+  const { balanceEmployees, getEmployeeIds, calculateEmployeeValue } = createBalanceCalculator(data);
+
+  // Порядок сотрудников — по персональным номерам из Google таблицы
+  const sortedReportEmployees = [...balanceEmployees].sort((a, b) => {
+    const aNumber = String(a.personalNumber ?? '').trim();
+    const bNumber = String(b.personalNumber ?? '').trim();
+    if (!aNumber && !bNumber) return 0;
+    if (!aNumber) return 1;
+    if (!bNumber) return -1;
+    return aNumber.localeCompare(bNumber, 'ru', { numeric: true });
+  });
+
+  // Приход/расход — за выбранный месяц (архивные тоже: архив только скрывает запись из списка).
+  // Остаток — стоимость остатков на руках на конец выбранного месяца (с начальными остатками и прошлыми месяцами).
+  const reportData = sortedReportEmployees.map(emp => {
+    const ids = getEmployeeIds(emp.id);
+    const isEmp = (employeeId: unknown) => ids.has(normId(employeeId));
+    const monthSheets = expenseSheets.filter(s => isEmp(s.employeeId) && s.month === selectedMonth);
+    const expenseSheetsCount = monthSheets.length;
+    const arrival = arrivals.filter(a => isEmp(a.employeeId) && a.month === selectedMonth).reduce((s, a) => s + a.amount, 0);
+    const expense = monthSheets.reduce((s, sheet) => s + sheet.totalAmount, 0);
+    return { emp, expenseSheetsCount, arrival, expense, balance: calculateEmployeeValue(emp.id, selectedMonth) };
   });
 
   const totals = {
@@ -696,8 +714,8 @@ function ReportsPage({ data }: { data: ReturnType<typeof useData> }) {
   };
 
   const exportCSV = () => {
-    const headers = ['ФИО', 'Должность', 'Приход (₽)', 'Расход (₽)', 'Остаток (₽)', 'Листы расхода'];
-    const rows = reportData.map(r => [r.emp.fullName, r.emp.position, r.arrival, r.expense, r.balance, r.expenseSheetsCount]);
+    const headers = ['№', 'ФИО', 'Должность', 'Приход (₽)', 'Расход (₽)', 'Остаток на конец месяца (₽)', 'Листы расхода'];
+    const rows = reportData.map(r => [String(r.emp.personalNumber ?? '').trim(), r.emp.fullName, r.emp.position, r.arrival, r.expense, r.balance, r.expenseSheetsCount]);
     const csv = [headers, ...rows].map(row => row.join(';')).join('\n');
     const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
@@ -728,7 +746,7 @@ function ReportsPage({ data }: { data: ReturnType<typeof useData> }) {
           <div className="text-xl font-bold text-red-600 mt-1">{totals.expense.toLocaleString('ru-RU')} ₽</div>
         </div>
         <div className="bg-white rounded-xl p-4 border border-slate-200 shadow-sm">
-          <div className="text-xs text-slate-500">Остаток</div>
+          <div className="text-xs text-slate-500">Остаток на конец месяца</div>
           <div className="text-xl font-bold text-blue-600 mt-1">{totals.balance.toLocaleString('ru-RU')} ₽</div>
         </div>
         <div className="bg-white rounded-xl p-4 border border-slate-200 shadow-sm">
@@ -748,14 +766,14 @@ function ReportsPage({ data }: { data: ReturnType<typeof useData> }) {
               <th className="px-5 py-3 text-xs font-medium text-slate-600 uppercase">ФИО</th>
               <th className="px-5 py-3 text-xs font-medium text-slate-600 uppercase text-right">Приход</th>
               <th className="px-5 py-3 text-xs font-medium text-slate-600 uppercase text-right">Расход</th>
-              <th className="px-5 py-3 text-xs font-medium text-slate-600 uppercase text-right">Остаток</th>
+              <th className="px-5 py-3 text-xs font-medium text-slate-600 uppercase text-right">Остаток на конец месяца</th>
               <th className="px-5 py-3 text-xs font-medium text-slate-600 uppercase text-right">Листы расхода</th>
             </tr>
           </thead>
           <tbody>
-            {reportData.map((row, i) => (
+            {reportData.map(row => (
               <tr key={row.emp.id} className="border-b border-slate-100 hover:bg-slate-50">
-                <td className="px-5 py-3 text-sm text-slate-500">{i + 1}</td>
+                <td className="px-5 py-3 text-sm text-slate-500">{String(row.emp.personalNumber ?? '').trim() || '—'}</td>
                 <td className="px-5 py-3">
                   <div className="text-sm font-medium text-slate-800">{row.emp.fullName}</div>
                   <div className="text-xs text-slate-500">{row.emp.position}</div>
@@ -2076,159 +2094,79 @@ function ExpensePage({ data }: { data: ReturnType<typeof useData> }) {
   );
 }
 
-// ============ ОСТАТОК У СОТРУДНИКА ============
-function BalancePage({ data }: { data: ReturnType<typeof useData> }) {
+// ============ РАСЧЁТ ОСТАТКОВ (общий для «Остаток у сотрудника» и панели руководителя) ============
+// ID из таблицы могут прийти числом (1), а из формы — строкой ("1"): сравниваем как строки
+const normId = (value: unknown) => String(value ?? '').trim();
+
+const parseItems = (items: unknown): any[] => {
+  if (typeof items === 'string') {
+    try { items = JSON.parse(items); } catch { return []; }
+  }
+  return Array.isArray(items) ? items : [];
+};
+
+function createBalanceCalculator(data: Pick<ReturnType<typeof useData>, 'employees' | 'nomenclature' | 'arrivals' | 'initialStocks' | 'expenseSheets'>) {
   const { employees, nomenclature, arrivals, initialStocks, expenseSheets } = data;
-  
-  // Получаем всех сотрудников, кроме уволенных (включая Неактивен, Отпуск и т.д.)
-  // Убираем дубликаты по ФИО — оставляем только первую запись с таким ФИО
+  const nameKey = (e: gs.Employee) => String(e.fullName ?? '').trim().toLowerCase();
+
+  // Все сотрудники, кроме уволенных; дубли по ФИО — одна колонка (первая запись)
   const seenNames = new Set<string>();
-  const allEmployees = employees.filter(e => {
+  const balanceEmployees = employees.filter(e => {
     if (e.status === 'Уволен') return false;
-    const fullName = String(e.fullName ?? '').trim().toLowerCase();
-    if (seenNames.has(fullName)) {
-      return false;
-    }
-    seenNames.add(fullName);
+    const key = nameKey(e);
+    if (seenNames.has(key)) return false;
+    seenNames.add(key);
     return true;
   });
-  
-  // Отладка: выводим всех сотрудников и их статусы
-  console.log('👥 ВСЕ СОТРУДНИКИ (включая уволенных):', employees.map(e => ({
-    id: e.id,
-    fullName: e.fullName,
-    status: e.status,
-    blocked: e.blocked,
-    shiftOpen: e.shiftOpen
-  })));
-  
-  console.log('✅ СОТРУДНИКИ ДЛЯ ОСТАТКОВ (без дубликатов и уволенных):', allEmployees.map(e => ({
-    id: e.id,
-    fullName: e.fullName,
-    status: e.status
-  })));
-  
-  // Проверяем, есть ли Григорьева в списке
-  const grigorieva = employees.find(e => e.fullName.includes('Григорьева'));
-  if (grigorieva) {
-    console.log('🔍 ГРИГОРЬЕВА найдена:', {
-      id: grigorieva.id,
-      fullName: grigorieva.fullName,
-      status: grigorieva.status,
-      isInAllEmployees: allEmployees.some(e => e.id === grigorieva.id)
-    });
-    
-    // Проверяем приходы Григорьевой
-    const grigorievaArrivals = arrivals.filter(a => a.employeeId === grigorieva.id);
-    console.log('📥 Приходы Григорьевой:', grigorievaArrivals.length, grigorievaArrivals.map(a => ({
-      id: a.id,
-      employeeId: a.employeeId,
-      amount: a.amount,
-      archived: a.archived,
-      itemsCount: Array.isArray(a.items) ? a.items.length : 'N/A'
-    })));
-  } else {
-    console.warn('⚠️ ГРИГОРЬЕВА НЕ НАЙДЕНА в списке сотрудников!');
-  }
 
-  // Отладочная информация - выводим все приходы
-  console.log('📊 ВСЕ ПРИХОДЫ:', arrivals.map(a => ({
-    id: a.id,
-    employeeId: a.employeeId,
-    employeeName: a.employeeName,
-    amount: a.amount,
-    archived: a.archived,
-    items: a.items,
-    itemsType: typeof a.items,
-    isArray: Array.isArray(a.items),
-    itemsLength: Array.isArray(a.items) ? a.items.length : 'N/A'
-  })));
-  
-  console.log('👥 ВСЕ СОТРУДНИКИ:', allEmployees.map(e => ({
-    id: e.id,
-    fullName: e.fullName,
-    status: e.status
-  })));
-  
-  // Проверяем приходы для каждого сотрудника
-  allEmployees.forEach((emp: gs.Employee) => {
-    const empArrivals = arrivals.filter(a => a.employeeId === emp.id && a.archived !== true);
-    console.log(`📥 Приходы для ${emp.fullName} (${emp.id}):`, empArrivals.length, empArrivals.map(a => ({
-      id: a.id,
-      amount: a.amount,
-      items: a.items,
-      itemsType: typeof a.items,
-      isArray: Array.isArray(a.items)
-    })));
-  });
-
-  // Функция для расчёта остатка по сотруднику и номенклатуре
-  const calculateBalance = (employeeId: string, nomenclatureId: string): number => {
-    const totalInitialStock = initialStocks
-      .filter(stock => stock.employeeId === employeeId && stock.nomenclatureId === nomenclatureId)
-      .reduce((sum, stock) => sum + stock.quantity, 0);
-
-    // Считаем приходы (только неархивированные и существующие)
-    let totalArrival = 0;
-    arrivals.forEach(arrival => {
-      // Проверяем, что запись не архивирована и существует в базе
-      if (arrival.employeeId === employeeId && 
-          arrival.archived !== true && 
-          arrival.id) {
-        // Проверяем, что items существует и является массивом
-        let items = arrival.items;
-        
-        // Если items - строка, пытаемся распарсить
-        if (typeof items === 'string') {
-          try {
-            items = JSON.parse(items);
-          } catch (e) {
-            console.warn('Не удалось распарсить items для прихода:', arrival.id, items);
-            items = [];
-          }
-        }
-        
-        if (Array.isArray(items) && items.length > 0) {
-          items.forEach((item: any) => {
-            if (item.nomenclatureId === nomenclatureId) {
-              totalArrival += Number(item.quantity) || 0;
-            }
-          });
-        }
-      }
-    });
-
-    // Считаем расходы (только неархивированные и существующие)
-    let totalExpense = 0;
-    expenseSheets.forEach(sheet => {
-      if (sheet.employeeId === employeeId && 
-          sheet.archived !== true && 
-          sheet.id) {
-        // Проверяем, что items существует и является массивом
-        let items = sheet.items;
-        
-        // Если items - строка, пытаемся распарсить
-        if (typeof items === 'string') {
-          try {
-            items = JSON.parse(items);
-          } catch (e) {
-            console.warn('Не удалось распарсить items для расхода:', sheet.id, items);
-            items = [];
-          }
-        }
-        
-        if (Array.isArray(items) && items.length > 0) {
-          items.forEach((item: any) => {
-            if (item.nomenclatureId === nomenclatureId) {
-              totalExpense += Number(item.quantity) || 0;
-            }
-          });
-        }
-      }
-    });
-
-    return totalInitialStock + totalArrival - totalExpense;
+  // Все записи сотрудника с тем же ФИО считаем вместе,
+  // иначе приход, оформленный на вторую запись, не попадает в остаток
+  const getEmployeeIds = (employeeId: string): Set<string> => {
+    const emp = employees.find(e => normId(e.id) === normId(employeeId));
+    const ids = new Set<string>([normId(employeeId)]);
+    const key = emp ? nameKey(emp) : '';
+    if (key) {
+      employees
+        .filter(e => e.status !== 'Уволен' && nameKey(e) === key)
+        .forEach(e => ids.add(normId(e.id)));
+    }
+    return ids;
   };
+
+  // Остаток (кол-во) по сотруднику и номенклатуре.
+  // Архивные приходы и листы расхода учитываются: архив только убирает запись из списка,
+  // а товар фактически выдан / потрачен.
+  // upToMonth ('ГГГГ-ММ') — остаток на конец этого месяца; без него — на текущий момент.
+  const calculateBalance = (employeeId: string, nomenclatureId: string, upToMonth?: string): number => {
+    const employeeIds = getEmployeeIds(employeeId);
+    const isEmployee = (id: unknown) => employeeIds.has(normId(id));
+    const isItem = (id: unknown) => normId(id) === normId(nomenclatureId);
+    const inPeriod = (month: unknown) => !upToMonth || !month || String(month) <= upToMonth;
+    const sumItems = (records: Array<{ id: string; employeeId: string; month?: string; items?: unknown }>) =>
+      records
+        .filter(r => r.id && isEmployee(r.employeeId) && inPeriod(r.month))
+        .reduce((sum, r) => sum + parseItems(r.items)
+          .filter((item: any) => isItem(item.nomenclatureId))
+          .reduce((s: number, item: any) => s + (Number(item.quantity) || 0), 0), 0);
+
+    const initial = initialStocks
+      .filter(stock => isEmployee(stock.employeeId) && isItem(stock.nomenclatureId))
+      .reduce((sum, stock) => sum + stock.quantity, 0);
+    return initial + sumItems(arrivals) - sumItems(expenseSheets);
+  };
+
+  // Стоимость остатков сотрудника по текущим ценам
+  const calculateEmployeeValue = (employeeId: string, upToMonth?: string): number =>
+    nomenclature.reduce((total, item) => total + calculateBalance(employeeId, item.id, upToMonth) * item.currentPrice, 0);
+
+  return { balanceEmployees, getEmployeeIds, calculateBalance, calculateEmployeeValue };
+}
+
+// ============ ОСТАТОК У СОТРУДНИКА ============
+function BalancePage({ data }: { data: ReturnType<typeof useData> }) {
+  const { nomenclature } = data;
+
+  const { balanceEmployees: allEmployees, calculateBalance } = createBalanceCalculator(data);
 
   // Функция для расчёта общего количества по номенклатуре
   const calculateTotalQuantity = (nomenclatureId: string): number => {
@@ -2815,8 +2753,11 @@ function ArrivalPage({ data }: { data: ReturnType<typeof useData> }) {
     return months;
   };
 
-  const filteredArrivals = arrivals.filter(a => a.month === selectedMonth);
-  const totalAmount = filteredArrivals.reduce((s, a) => s + a.amount, 0);
+  // Все карты за месяц (включая архивные) — для суммы, как в «Расход у сотрудника»
+  const allArrivalsForMonth = arrivals.filter(a => a.month === selectedMonth);
+  // В списке показываем только неархивные — архивные видны в разделе «Архив»
+  const filteredArrivals = allArrivalsForMonth.filter(a => !a.archived);
+  const totalAmount = allArrivalsForMonth.reduce((s, a) => s + a.amount, 0);
   const selectedMonthName = new Date(selectedMonth + '-01').toLocaleString('ru-RU', { month: 'long', year: 'numeric' });
 
   const handleEditArrival = async (form: any) => {
@@ -4485,7 +4426,7 @@ export default function App() {
 
 // ============ DASHBOARD ============
 function Dashboard({ data }: { data: ReturnType<typeof useData> }) {
-  const { employees, nomenclature, arrivals, initialStocks, expenseSheets, returns } = data;
+  const { employees, arrivals, expenseSheets, returns } = data;
   const now = new Date();
   const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
   
@@ -4503,42 +4444,71 @@ function Dashboard({ data }: { data: ReturnType<typeof useData> }) {
   const currentMonthNameNominative = now.toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' });
   
   const activeEmployees = employees.filter(e => e.status === 'Активен');
-  const allEmployees = employees.filter(e => e.status !== 'Уволен');
 
-  // Расчеты за предыдущий месяц
-  const getArrival = (empId: string, month: string) => arrivals.filter(a => a.employeeId === empId && a.month === month).reduce((s, a) => s + a.amount, 0);
-  const getExpenseValue = (empId: string, month: string) => expenseSheets.filter(s => s.employeeId === empId && s.month === month && !s.archived).reduce((s, sheet) => s + sheet.totalAmount, 0);
-  const getExpenseCount = (empId: string, month: string) => expenseSheets.filter(s => s.employeeId === empId && s.month === month && !s.archived).length;
+  // Тот же расчёт и тот же список сотрудников, что и в «Остаток у сотрудника»
+  const { balanceEmployees, getEmployeeIds, calculateEmployeeValue } = createBalanceCalculator(data);
+  const summaryEmployees = [...balanceEmployees].sort((a, b) => {
+    const aNumber = String(a.personalNumber ?? '').trim();
+    const bNumber = String(b.personalNumber ?? '').trim();
+    if (!aNumber && !bNumber) return 0;
+    if (!aNumber) return 1;
+    if (!bNumber) return -1;
+    return aNumber.localeCompare(bNumber, 'ru', { numeric: true });
+  });
 
-  const calculateEmployeeBalanceValue = (employeeId: string): number => {
-    return nomenclature.reduce((total, nomenclatureItem) => {
-      const initialQuantity = initialStocks
-        .filter(stock => stock.employeeId === employeeId && stock.nomenclatureId === nomenclatureItem.id)
-        .reduce((sum, stock) => sum + stock.quantity, 0);
-      const arrivalQuantity = arrivals
-        .filter(arrival => arrival.employeeId === employeeId && !arrival.archived)
-        .reduce((sum, arrival) => sum + (arrival.items || [])
-          .filter(item => item.nomenclatureId === nomenclatureItem.id)
-          .reduce((itemSum, item) => itemSum + (Number(item.quantity) || 0), 0), 0);
-      const expenseQuantity = expenseSheets
-        .filter(sheet => sheet.employeeId === employeeId && !sheet.archived)
-        .reduce((sum, sheet) => sum + sheet.items
-          .filter(item => item.nomenclatureId === nomenclatureItem.id)
-          .reduce((itemSum, item) => itemSum + (Number(item.quantity) || 0), 0), 0);
-      return total + (initialQuantity + arrivalQuantity - expenseQuantity) * nomenclatureItem.currentPrice;
-    }, 0);
+  // Расчеты за месяц: архивные записи тоже учитываются (архив только скрывает запись из списка)
+  const belongsTo = (empId: string) => {
+    const ids = getEmployeeIds(empId);
+    return (recordEmployeeId: unknown) => ids.has(normId(recordEmployeeId));
   };
+  const getArrival = (empId: string, month: string) => {
+    const isEmp = belongsTo(empId);
+    return arrivals.filter(a => isEmp(a.employeeId) && a.month === month).reduce((s, a) => s + a.amount, 0);
+  };
+  const getMonthSheets = (empId: string, month: string) => {
+    const isEmp = belongsTo(empId);
+    return expenseSheets.filter(s => isEmp(s.employeeId) && s.month === month);
+  };
+  const getExpenseValue = (empId: string, month: string) => getMonthSheets(empId, month).reduce((s, sheet) => s + sheet.totalAmount, 0);
+  const getExpenseCount = (empId: string, month: string) => getMonthSheets(empId, month).length;
 
-  const totalArrivalLastMonth = activeEmployees.reduce((s, e) => s + getArrival(e.id, lastMonth), 0);
-  const totalExpenseLastMonth = activeEmployees.reduce((s, e) => s + getExpenseValue(e.id, lastMonth), 0);
-  const totalExpenseCountLastMonth = activeEmployees.reduce((s, e) => s + getExpenseCount(e.id, lastMonth), 0);
-  
+  // Итоги в карточках = сумма по строкам таблицы «Сотрудники — общая сводка»
+  const totalArrivalLastMonth = summaryEmployees.reduce((s, e) => s + getArrival(e.id, lastMonth), 0);
+  const totalExpenseLastMonth = summaryEmployees.reduce((s, e) => s + getExpenseValue(e.id, lastMonth), 0);
+  const totalExpenseCountLastMonth = summaryEmployees.reduce((s, e) => s + getExpenseCount(e.id, lastMonth), 0);
+
   // Остатки на руках = сумма стоимости остатков всех сотрудников
-  const totalBalanceOnHand = allEmployees.reduce((s, e) => s + calculateEmployeeBalanceValue(e.id), 0);
+  const totalBalanceOnHand = summaryEmployees.reduce((s, e) => s + calculateEmployeeValue(e.id), 0);
   
   const pendingReturns = returns.filter(r => r.status === 'Новый').length;
 
-  const [notifications, setNotifications] = useState<Array<{ id: number; text: string; time: string; type: string }>>([]);
+  // Уведомления о превышении лимита в листах расхода (расход > 5% стоимости терапии,
+  // то же правило, что в «Расход у сотрудника»). Архивные листы считаются обработанными.
+  // Закрытые уведомления запоминаются в этом браузере.
+  const DISMISSED_KEY = 'dismissedLimitNotifications';
+  const [dismissedIds, setDismissedIds] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem(DISMISSED_KEY) || '[]'); } catch { return []; }
+  });
+  const formatDate = (value: string) => {
+    const d = new Date(value);
+    return isNaN(d.getTime()) ? value : d.toLocaleDateString('ru-RU');
+  };
+  const notifications = expenseSheets
+    .filter(sheet => !sheet.archived && sheet.therapyCost > 0 && (sheet.totalAmount * 100) / sheet.therapyCost > 5)
+    .filter(sheet => !dismissedIds.includes(sheet.id))
+    .sort((a, b) => String(b.date).localeCompare(String(a.date)))
+    .map(sheet => {
+      const percent = (sheet.totalAmount * 100) / sheet.therapyCost;
+      const limitAmount = sheet.therapyCost * 0.05;
+      const employee = employees.find(e => normId(e.id) === normId(sheet.employeeId));
+      const name = employee?.fullName || sheet.employeeName || 'Сотрудник';
+      return {
+        id: sheet.id,
+        type: 'alert',
+        text: `⚠️ Превышение лимита: ${name} — ${percent.toFixed(2)}% (${sheet.totalAmount.toLocaleString('ru-RU')} ₽ при лимите ${limitAmount.toLocaleString('ru-RU')} ₽)`,
+        time: `Лист расхода от ${formatDate(sheet.date)}${sheet.patientName ? ` • пациент: ${sheet.patientName}` : ''}`,
+      };
+    });
   const messages = data.chatMessages
     .filter(isIncomingUnreadMessage)
     .sort((a, b) => b.date.localeCompare(a.date))
@@ -4549,8 +4519,10 @@ function Dashboard({ data }: { data: ReturnType<typeof useData> }) {
       time: msg.date ? new Date(msg.date).toLocaleString('ru-RU') : '',
     }));
 
-  const handleNotificationClick = (id: number) => {
-    setNotifications(notifications.filter(n => n.id !== id));
+  const handleNotificationClick = (id: string) => {
+    const next = [...dismissedIds, id];
+    setDismissedIds(next);
+    try { localStorage.setItem(DISMISSED_KEY, JSON.stringify(next)); } catch { /* хранилище недоступно — скроем до перезагрузки */ }
   };
 
   const handleMessageClick = (id: string) => {
@@ -4711,20 +4683,11 @@ function Dashboard({ data }: { data: ReturnType<typeof useData> }) {
               </tr>
             </thead>
             <tbody>
-              {employees
-                .filter(e => e.status !== 'Уволен')
-                .sort((a, b) => {
-                  const aNumber = String(a.personalNumber ?? '').trim();
-                  const bNumber = String(b.personalNumber ?? '').trim();
-                  if (!aNumber && !bNumber) return 0;
-                  if (!aNumber) return 1;
-                  if (!bNumber) return -1;
-                  return aNumber.localeCompare(bNumber, 'ru', { numeric: true });
-                })
+              {summaryEmployees
                 .map(emp => {
                   const arr = getArrival(emp.id, lastMonth);
                   const exp = getExpenseValue(emp.id, lastMonth);
-                  const bal = calculateEmployeeBalanceValue(emp.id);
+                  const bal = calculateEmployeeValue(emp.id);
                   const expenseCount = getExpenseCount(emp.id, lastMonth);
                   return (
                   <tr key={emp.id} className="border-b border-slate-100 hover:bg-blue-50 hover:shadow-md transition-all duration-200 cursor-pointer">
@@ -4741,12 +4704,15 @@ function Dashboard({ data }: { data: ReturnType<typeof useData> }) {
                     </td>
                     <td className="px-5 py-3">
                       <div className="flex flex-wrap gap-1">
-                        {emp.blocked ? (
+                        {/* Статус из листа «Сотрудники» — тот же, что считается в «Активных сотрудников» */}
+                        <span className={`px-2 py-1 rounded-full text-xs ${emp.status === 'Активен' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>
+                          {emp.status || 'Не указан'}
+                        </span>
+                        {emp.blocked && (
                           <span className="px-2 py-1 rounded-full text-xs bg-orange-100 text-orange-700">🔒 Заблокирован</span>
-                        ) : emp.shiftOpen ? (
-                          <span className="px-2 py-1 rounded-full text-xs bg-emerald-100 text-emerald-700">🟢 Активен</span>
-                        ) : (
-                          <span className="px-2 py-1 rounded-full text-xs bg-slate-100 text-slate-600">⚪ Не активен</span>
+                        )}
+                        {emp.shiftOpen && (
+                          <span className="px-2 py-1 rounded-full text-xs bg-blue-100 text-blue-700">🟢 На смене</span>
                         )}
                       </div>
                     </td>
