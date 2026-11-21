@@ -1,6 +1,9 @@
 import { useState, useEffect, useCallback, useRef, Component, type ReactNode } from 'react';
 import * as gs from './services/googleSheets';
 
+// Версия приложения руководителя (также в заголовке вкладки в index.html)
+const APP_VERSION = '0.5.5';
+
 // ============ ХУК ДЛЯ РАБОТЫ С ДАННЫМИ ============
 // Результат фоновой загрузки можно применять, только если за это время ничего не сохранялось
 const isFresh = (atStart: { pending: number; version: number }) => {
@@ -112,7 +115,7 @@ function useData() {
   };
 }
 
-type Page = 'dashboard' | 'employees' | 'nomenclature' | 'arrival' | 'expense' | 'balance' | 'archive' | 'chat' | 'reports' | 'audit' | 'settings';
+type Page = 'dashboard' | 'employees' | 'nomenclature' | 'arrival' | 'expense' | 'balance' | 'returns' | 'archive' | 'chat' | 'reports' | 'audit' | 'settings';
 
 const isIncomingUnreadMessage = (msg: gs.ChatMessage) =>
   !msg.read && !['MGR', 'Руководитель', 'Manager', 'admin'].includes(msg.fromId);
@@ -357,7 +360,7 @@ function SettingsPage({ data }: { data: ReturnType<typeof useData> }) {
           </div>
           <div className="flex justify-between py-2 border-b border-slate-100">
             <span className="text-sm text-slate-500">Версия</span>
-            <span className="text-sm text-slate-800">0.5.2 (Apps Script Web App)</span>
+            <span className="text-sm text-slate-800">{APP_VERSION}</span>
           </div>
           <div className="flex justify-between py-2 border-b border-slate-100">
             <span className="text-sm text-slate-500">Хранилище</span>
@@ -2065,7 +2068,15 @@ function ExpensePage({ data, focusSheetId, onFocusHandled }: {
   }, [highlightedSheetId]);
 
   // Фильтрация по месяцу (для отображения)
-  const filteredSheets = expenseSheets.filter(s => s.month === selectedMonth && !s.archived);
+  // Сначала новые: по дате листа, при равной дате — по времени создания из ID (SHEET-<время>-...)
+  const sheetTime = (s: gs.ExpenseSheet) => {
+    const t = new Date(s.date).getTime();
+    return Number.isNaN(t) ? 0 : t;
+  };
+  const idTime = (s: gs.ExpenseSheet) => Number(String(s.id).match(/(\d{10,})/)?.[1] ?? 0);
+  const filteredSheets = expenseSheets
+    .filter(s => s.month === selectedMonth && !s.archived)
+    .sort((a, b) => sheetTime(b) - sheetTime(a) || idTime(b) - idTime(a));
 
   // Все листы за месяц (включая архивированные) для расчёта статистики
   const allSheetsForMonth = expenseSheets.filter(s => s.month === selectedMonth);
@@ -2200,8 +2211,8 @@ const parseItems = (items: unknown): any[] => {
   return Array.isArray(items) ? items : [];
 };
 
-function createBalanceCalculator(data: Pick<ReturnType<typeof useData>, 'employees' | 'nomenclature' | 'arrivals' | 'initialStocks' | 'expenseSheets'>) {
-  const { employees, nomenclature, arrivals, initialStocks, expenseSheets } = data;
+function createBalanceCalculator(data: Pick<ReturnType<typeof useData>, 'employees' | 'nomenclature' | 'arrivals' | 'initialStocks' | 'expenseSheets'> & { returns?: gs.ReturnOperation[] }) {
+  const { employees, nomenclature, arrivals, initialStocks, expenseSheets, returns } = data;
   const nameKey = (e: gs.Employee) => String(e.fullName ?? '').trim().toLowerCase();
 
   // Все сотрудники, кроме уволенных; дубли по ФИО — одна колонка (первая запись)
@@ -2247,7 +2258,11 @@ function createBalanceCalculator(data: Pick<ReturnType<typeof useData>, 'employe
     const initial = initialStocks
       .filter(stock => isEmployee(stock.employeeId) && isItem(stock.nomenclatureId))
       .reduce((sum, stock) => sum + stock.quantity, 0);
-    return initial + sumItems(arrivals) - sumItems(expenseSheets);
+    // Возвраты уменьшают остаток, когда руководитель их подтвердил (с учётом корректировки)
+    const returned = (returns ?? [])
+      .filter(r => isEmployee(r.employeeId) && isItem(r.nomenclatureId) && inPeriod(r.month))
+      .reduce((sum, r) => sum + gs.returnedQuantity(r), 0);
+    return initial + sumItems(arrivals) - sumItems(expenseSheets) - returned;
   };
 
   // Стоимость остатков сотрудника по текущим ценам
@@ -2255,6 +2270,157 @@ function createBalanceCalculator(data: Pick<ReturnType<typeof useData>, 'employe
     nomenclature.reduce((total, item) => total + calculateBalance(employeeId, item.id, upToMonth) * item.currentPrice, 0);
 
   return { balanceEmployees, getEmployeeIds, calculateBalance, calculateEmployeeValue };
+}
+
+// ============ ВОЗВРАТЫ ============
+// Сотрудник оформляет возврат в своём приложении («Ожидает подтверждения»).
+// Руководитель подтверждает (можно с другим количеством — если вернули меньше) или отклоняет.
+// Подтверждённое количество уменьшает остаток сотрудника.
+function ReturnsPage({ data }: { data: ReturnType<typeof useData> }) {
+  const { returns, setReturns, employees, nomenclature } = data;
+  const [filter, setFilter] = useState<'pending' | 'all'>('pending');
+  const [correcting, setCorrecting] = useState<{ id: string; quantity: string } | null>(null);
+  const [savingId, setSavingId] = useState<string | null>(null);
+
+  const pendingCount = returns.filter(gs.isReturnPending).length;
+  const list = returns
+    .filter(r => filter === 'all' || gs.isReturnPending(r))
+    .sort((a, b) => String(b.date).localeCompare(String(a.date)));
+
+  const employeeName = (r: gs.ReturnOperation) =>
+    employees.find(e => normId(e.id) === normId(r.employeeId))?.fullName || r.employeeName || r.employeeId;
+  const itemName = (r: gs.ReturnOperation) =>
+    nomenclature.find(n => normId(n.id) === normId(r.nomenclatureId))?.name || r.name || r.nomenclatureId;
+  const formatDate = (value?: string) => {
+    if (!value) return '';
+    const d = new Date(value);
+    return isNaN(d.getTime()) ? value : d.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  };
+
+  const decide = async (r: gs.ReturnOperation, decision: { status: string; correctedQuantity?: number | null; comment?: string }) => {
+    const previous = returns;
+    setSavingId(r.id);
+    setReturns(returns.map(x => x.id === r.id ? {
+      ...x, status: decision.status,
+      correctedQuantity: decision.correctedQuantity !== undefined ? decision.correctedQuantity : x.correctedQuantity,
+      comment: decision.comment ?? x.comment, correctedBy: 'Руководитель', processedAt: new Date().toISOString(),
+    } : x));
+    try {
+      await gs.updateReturn(r.id, decision);
+    } catch (err) {
+      console.error('Ошибка сохранения возврата:', err);
+      setReturns(previous);
+      const reason = err instanceof Error ? err.message : String(err);
+      alert(reason.includes('Неизвестное действие')
+        ? 'Не удалось сохранить: Google-скрипт устарел и не умеет сохранять решения по возвратам.\nОбновите Apps Script до версии 0.5.6 (Развернуть → Управление развертываниями → Новая версия).'
+        : `Не удалось сохранить решение по возврату. Попробуйте ещё раз.\n\nПричина: ${reason}`);
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  const confirmReturn = (r: gs.ReturnOperation) => decide(r, { status: gs.RETURN_STATUS.confirmed, correctedQuantity: null });
+  const saveCorrection = (r: gs.ReturnOperation) => {
+    const qty = Number(correcting?.quantity);
+    if (!Number.isInteger(qty) || qty < 0) { alert('Введите целое количество от 0'); return; }
+    setCorrecting(null);
+    void decide(r, { status: gs.RETURN_STATUS.confirmed, correctedQuantity: qty });
+  };
+  const rejectReturn = (r: gs.ReturnOperation) => {
+    const comment = prompt('Причина отклонения (необязательно):', '');
+    if (comment === null) return;
+    void decide(r, { status: gs.RETURN_STATUS.rejected, comment: comment.trim() || r.comment });
+  };
+
+  const statusBadge = (r: gs.ReturnOperation) => {
+    if (gs.isReturnPending(r)) return <span className="px-2 py-1 rounded-full text-xs bg-orange-100 text-orange-700">⏳ Ожидает подтверждения</span>;
+    if (r.status === gs.RETURN_STATUS.confirmed) return <span className="px-2 py-1 rounded-full text-xs bg-emerald-100 text-emerald-700">✅ Подтверждён</span>;
+    if (r.status === gs.RETURN_STATUS.rejected) return <span className="px-2 py-1 rounded-full text-xs bg-red-100 text-red-700">✖ Отклонён</span>;
+    return <span className="px-2 py-1 rounded-full text-xs bg-slate-100 text-slate-600">{r.status}</span>;
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h2 className="text-2xl font-bold text-slate-800">↩️ Возвраты</h2>
+          <p className="text-slate-500 text-sm mt-1">Подтверждённый возврат уменьшает остаток у сотрудника</p>
+        </div>
+        <div className="flex gap-2">
+          <button onClick={() => setFilter('pending')}
+            className={`px-4 py-2 rounded-lg text-sm font-medium border ${filter === 'pending' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'}`}>
+            Ожидают ({pendingCount})
+          </button>
+          <button onClick={() => setFilter('all')}
+            className={`px-4 py-2 rounded-lg text-sm font-medium border ${filter === 'all' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'}`}>
+            Все ({returns.length})
+          </button>
+        </div>
+      </div>
+
+      {list.length === 0 ? (
+        <div className="bg-white rounded-xl p-8 text-center text-slate-500 border border-slate-200">
+          {filter === 'pending' ? 'Нет возвратов, ожидающих подтверждения' : 'Возвратов пока нет'}
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {list.map(r => {
+            const pending = gs.isReturnPending(r);
+            const busy = savingId === r.id;
+            return (
+              <div key={r.id} data-return-id={r.id} className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+                <div className="flex flex-col md:flex-row md:items-start justify-between gap-3">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-semibold text-slate-800">{itemName(r)}</span>
+                      <span className="text-slate-600">—</span>
+                      <span className="font-semibold text-slate-800">{r.quantity} {r.unit}</span>
+                      {statusBadge(r)}
+                    </div>
+                    <div className="text-sm text-slate-600">Сотрудник: {employeeName(r)}</div>
+                    <div className="text-sm text-slate-500">Оформлен: {formatDate(r.date)}</div>
+                    {r.reason && <div className="text-sm text-slate-600">Причина: {r.reason}</div>}
+                    {r.status === gs.RETURN_STATUS.confirmed && (
+                      <div className="text-sm text-emerald-700">
+                        Принято: {r.correctedQuantity ?? r.quantity} {r.unit}
+                        {r.correctedQuantity !== null && r.correctedQuantity !== r.quantity && ` (вместо ${r.quantity})`}
+                        {r.processedAt && ` • ${formatDate(r.processedAt)}`}
+                      </div>
+                    )}
+                    {r.status === gs.RETURN_STATUS.rejected && (
+                      <div className="text-sm text-red-700">
+                        Отклонён{r.processedAt && ` ${formatDate(r.processedAt)}`}{r.comment && ` • ${r.comment}`}
+                      </div>
+                    )}
+                  </div>
+
+                  {pending && (
+                    <div className="flex flex-wrap gap-2 md:justify-end">
+                      {correcting?.id === r.id ? (
+                        <>
+                          <input type="number" min={0} value={correcting.quantity} autoFocus
+                            onChange={e => setCorrecting({ id: r.id, quantity: e.target.value })}
+                            className="w-24 px-3 py-2 border border-slate-300 rounded-lg text-sm" aria-label="Фактически возвращено" />
+                          <button onClick={() => saveCorrection(r)} className="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm rounded-lg">Сохранить</button>
+                          <button onClick={() => setCorrecting(null)} className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm rounded-lg">Отмена</button>
+                        </>
+                      ) : (
+                        <>
+                          <button disabled={busy} onClick={() => void confirmReturn(r)} className="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm rounded-lg disabled:opacity-50">✅ Подтвердить</button>
+                          <button disabled={busy} onClick={() => setCorrecting({ id: r.id, quantity: String(r.quantity) })} className="px-3 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 text-sm rounded-lg border border-blue-200 disabled:opacity-50">✍️ Другое количество</button>
+                          <button disabled={busy} onClick={() => rejectReturn(r)} className="px-3 py-2 bg-red-50 hover:bg-red-100 text-red-700 text-sm rounded-lg border border-red-200 disabled:opacity-50">✖ Отклонить</button>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ============ ОСТАТОК У СОТРУДНИКА ============
@@ -4431,6 +4597,7 @@ export default function App() {
 
   // Подсчёт непрочитанных сообщений
   const unreadMessagesCount = data.chatMessages.filter(isIncomingUnreadMessage).length;
+  const pendingReturnsCount = data.returns.filter(gs.isReturnPending).length;
 
   const menuItems: { id: Page; label: string; icon: string }[] = [
     { id: 'dashboard', label: 'Панель руководителя', icon: '👨‍⚕️' },
@@ -4439,6 +4606,7 @@ export default function App() {
     { id: 'arrival', label: 'Приход к сотруднику', icon: '📥' },
     { id: 'expense', label: 'Расход у сотрудника', icon: '📤' },
     { id: 'balance', label: 'Остаток у сотрудника', icon: '🧰' },
+    { id: 'returns', label: 'Возвраты', icon: '↩️' },
     { id: 'chat', label: 'Сообщения', icon: '💬' },
     { id: 'reports', label: 'Отчёты', icon: '📈' },
     { id: 'audit', label: 'Журнал', icon: '📝' },
@@ -4448,12 +4616,13 @@ export default function App() {
 
   const renderPage = () => {
     switch (currentPage) {
-      case 'dashboard': return <Dashboard data={data} onOpenSheet={openExpenseSheet} onOpenChat={openChat} />;
+      case 'dashboard': return <Dashboard data={data} onOpenSheet={openExpenseSheet} onOpenChat={openChat} onOpenReturns={() => setCurrentPage('returns')} />;
       case 'employees': return <EmployeesPage data={data} />;
       case 'nomenclature': return <NomenclaturePage data={data} />;
       case 'arrival': return <ArrivalPage data={data} />;
       case 'expense': return <ExpensePage data={data} focusSheetId={focusSheetId} onFocusHandled={() => setFocusSheetId(null)} />;
       case 'balance': return <BalancePage data={data} />;
+      case 'returns': return <ReturnsPage data={data} />;
       case 'archive': return <ArchivePage data={data} />;
       case 'chat': return <ChatPage data={data} focusEmployeeId={focusChatEmployeeId} onFocusHandled={() => setFocusChatEmployeeId(null)} />;
       case 'reports': return <ReportsPage data={data} />;
@@ -4472,7 +4641,7 @@ export default function App() {
             <div className="overflow-hidden">
               <h1 className="text-sm font-bold whitespace-nowrap"><span className="text-blue-600">Алко</span><span className="text-red-600">Спас</span></h1>
               <p className="text-xs text-slate-500 leading-tight">Система медицинского учета</p>
-              <p className="text-xs text-emerald-600 font-semibold">(v. 0.5.2)</p>
+              <p className="text-xs text-emerald-600 font-semibold">(v. {APP_VERSION})</p>
             </div>
           )}
         </div>
@@ -4491,6 +4660,11 @@ export default function App() {
                   {item.id === 'chat' && unreadMessagesCount > 0 && (
                     <span className="bg-red-500 text-white text-xs font-bold rounded-full min-w-[20px] h-5 flex items-center justify-center px-1.5">
                       {unreadMessagesCount}
+                    </span>
+                  )}
+                  {item.id === 'returns' && pendingReturnsCount > 0 && (
+                    <span className="bg-orange-500 text-white text-xs font-bold rounded-full min-w-[20px] h-5 flex items-center justify-center px-1.5" title="Ожидают подтверждения">
+                      {pendingReturnsCount}
                     </span>
                   )}
                 </>
@@ -4532,10 +4706,11 @@ export default function App() {
 }
 
 // ============ DASHBOARD ============
-function Dashboard({ data, onOpenSheet, onOpenChat }: {
+function Dashboard({ data, onOpenSheet, onOpenChat, onOpenReturns }: {
   data: ReturnType<typeof useData>;
   onOpenSheet: (sheetId: string) => void;
   onOpenChat: (employeeId: string) => void;
+  onOpenReturns: () => void;
 }) {
   const { employees, arrivals, expenseSheets, returns } = data;
   const now = new Date();
@@ -4591,7 +4766,8 @@ function Dashboard({ data, onOpenSheet, onOpenChat }: {
   // Остатки на руках = сумма стоимости остатков всех сотрудников
   const totalBalanceOnHand = summaryEmployees.reduce((s, e) => s + calculateEmployeeValue(e.id), 0);
   
-  const pendingReturns = returns.filter(r => r.status === 'Новый').length;
+  // Сотрудники оформляют возвраты со статусом «Ожидает подтверждения» (раньше считались только «Новый»)
+  const pendingReturns = returns.filter(gs.isReturnPending).length;
 
   // Уведомления о превышении лимита в листах расхода (расход > 5% стоимости терапии,
   // то же правило, что в «Расход у сотрудника»). Архивные листы считаются обработанными.
@@ -4772,12 +4948,17 @@ function Dashboard({ data, onOpenSheet, onOpenChat }: {
       </div>
 
       {pendingReturns > 0 && (
-        <div className="bg-orange-50 border border-orange-200 rounded-xl p-4 flex items-center gap-3">
+        <div
+          onClick={onOpenReturns}
+          title="Открыть возвраты"
+          className="bg-orange-50 border border-orange-200 rounded-xl p-4 flex items-center gap-3 cursor-pointer hover:border-orange-300 hover:shadow-md transition-shadow"
+        >
           <span className="text-2xl">↩️</span>
           <div className="flex-1">
             <span className="text-orange-700 font-semibold">Ожидают обработки возвратов:</span>
             <span className="text-orange-600 ml-2">{pendingReturns}</span>
           </div>
+          <span className="text-orange-600 text-sm font-medium">Открыть →</span>
         </div>
       )}
 

@@ -136,7 +136,23 @@ export interface ReturnOperation {
   id: string; employeeId: string; date: string; nomenclatureId: string;
   quantity: number; status: string; correctedBy: string;
   correctedQuantity: number | null; comment: string; reason: string;
+  employeeName?: string; name?: string; unit?: string; month?: string; processedAt?: string;
 }
+
+// Статусы возврата
+export const RETURN_STATUS = {
+  pending: 'Ожидает подтверждения',
+  confirmed: 'Подтверждён',
+  rejected: 'Отклонён',
+} as const;
+
+/** Возврат ещё ждёт решения руководителя */
+export const isReturnPending = (r: ReturnOperation) =>
+  r.status === RETURN_STATUS.pending || r.status === 'Новый' || !r.status;
+
+/** Сколько фактически возвращено (уменьшает остаток сотрудника): только подтверждённые */
+export const returnedQuantity = (r: ReturnOperation) =>
+  r.status === RETURN_STATUS.confirmed ? (r.correctedQuantity ?? r.quantity) : 0;
 
 export interface ChatMessage {
   id: string; fromId: string; fromName: string; toId: string; toName: string;
@@ -225,14 +241,39 @@ export async function getExpenses(): Promise<Expense[]> {
 
 export async function getReturns(): Promise<ReturnOperation[]> {
   const data = await fetchData('getReturns');
-  return data.map((row: any) => ({
-    id: row['ID'] || '', employeeId: row['Сотрудник_ID'] || '',
-    date: row['Дата создания'] || '', nomenclatureId: row['Номенклатура_ID'] || '',
-    quantity: parseInt(row['Количество'] || '0'), status: row['Статус'] || 'Новый',
-    correctedBy: row['Кем скорректировано'] || '',
-    correctedQuantity: row['Скорректированное кол-во'] ? parseInt(row['Скорректированное кол-во']) : null,
-    comment: row['Комментарий'] || '', reason: row['Причина'] || '',
-  }));
+  return data.map((row: any) => {
+    // В таблице колонки могут называться коротко («Скорр. кол-во», «Кем скорр.») или полностью
+    const corrected = row['Скорр. кол-во'] ?? row['Скорректированное кол-во'];
+    return {
+      id: row['ID'] || '', employeeId: String(row['Сотрудник_ID'] || '').trim(),
+      date: row['Дата создания'] || '', nomenclatureId: String(row['Номенклатура_ID'] || '').trim(),
+      quantity: Number(row['Количество']) || 0, status: row['Статус'] || RETURN_STATUS.pending,
+      correctedBy: row['Кем скорр.'] || row['Кем скорректировано'] || '',
+      correctedQuantity: corrected !== undefined && corrected !== '' ? Number(corrected) : null,
+      comment: row['Комментарий'] || '', reason: row['Причина'] || '',
+      employeeName: row['ФИО сотрудника'] || '', name: row['Название'] || '',
+      unit: row['Ед. изм.'] || row['Ед. измерения'] || '', month: row['Месяц'] || '',
+      processedAt: row['Дата обработки'] || '',
+    };
+  });
+}
+
+/** Решение руководителя по возврату: подтвердить (с корректировкой количества) или отклонить */
+export async function updateReturn(id: string, decision: {
+  status: string; correctedQuantity?: number | null; comment?: string;
+}): Promise<void> {
+  const now = new Date().toISOString();
+  const data: Record<string, any> = {
+    'Статус': decision.status,
+    'Кем скорр.': 'Руководитель', 'Кем скорректировано': 'Руководитель',
+    'Дата обработки': now,
+  };
+  if (decision.correctedQuantity !== undefined) {
+    const value = decision.correctedQuantity ?? '';
+    data['Скорр. кол-во'] = value; data['Скорректированное кол-во'] = value;
+  }
+  if (decision.comment !== undefined) data['Комментарий'] = decision.comment;
+  await postData('updateReturn', { id, data });
 }
 
 export async function getChatMessages(): Promise<ChatMessage[]> {
