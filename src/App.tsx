@@ -2,6 +2,12 @@ import { useState, useEffect, useCallback, useRef, Component, type ReactNode } f
 import * as gs from './services/googleSheets';
 
 // ============ ХУК ДЛЯ РАБОТЫ С ДАННЫМИ ============
+// Результат фоновой загрузки можно применять, только если за это время ничего не сохранялось
+const isFresh = (atStart: { pending: number; version: number }) => {
+  const now = gs.getWriteState();
+  return atStart.pending === 0 && now.pending === 0 && now.version === atStart.version;
+};
+
 function useData() {
   const [employees, setEmployees] = useState<gs.Employee[]>([]);
   const [nomenclature, setNomenclature] = useState<gs.Nomenclature[]>([]);
@@ -40,9 +46,10 @@ function useData() {
     const refreshLiveData = async () => {
       if (updating) return;
       updating = true;
+      const writesAtStart = gs.getWriteState();
       try {
         const employeesRequest = gs.getEmployees().then(emps => {
-          if (active) setEmployees(emps);
+          if (active && isFresh(writesAtStart)) setEmployees(emps);
         });
         const messagesRequest = gs.getChatMessages().then(messages => {
           if (active) {
@@ -60,12 +67,40 @@ function useData() {
       }
     };
 
+    // Данные, которые создают сотрудники: листы расхода, возвраты, начальные остатки, приходы.
+    // Раньше они загружались только при открытии страницы, и новый лист расхода
+    // появлялся лишь после ручного обновления. Теперь — раз в 15 секунд и при возврате на вкладку.
+    let updatingRecords = false;
+    const refreshRecords = async () => {
+      if (updatingRecords || document.hidden) return;
+      updatingRecords = true;
+      const writesAtStart = gs.getWriteState();
+      try {
+        const [sheets, arrs, rets, stocks] = await Promise.all([
+          gs.getExpenseSheets(), gs.getArrivals(), gs.getReturns(), gs.getInitialStock(),
+        ]);
+        // Пока шла загрузка, руководитель что-то сохранил — данные могли устареть, ждём следующий раз
+        if (!active || !isFresh(writesAtStart)) return;
+        setExpenseSheets(sheets); setArrivals(arrs); setReturns(rets); setInitialStocks(stocks);
+      } catch (err) {
+        console.error('Ошибка фонового обновления листов расхода и приходов:', err);
+      } finally {
+        updatingRecords = false;
+      }
+    };
+
+    const onFocus = () => { void refreshLiveData(); void refreshRecords(); };
+    const onVisible = () => { if (!document.hidden) void refreshRecords(); };
     const interval = window.setInterval(refreshLiveData, 5000);
-    window.addEventListener('focus', refreshLiveData);
+    const recordsInterval = window.setInterval(refreshRecords, 15000);
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisible);
     return () => {
       active = false;
       window.clearInterval(interval);
-      window.removeEventListener('focus', refreshLiveData);
+      window.clearInterval(recordsInterval);
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisible);
     };
   }, []);
 

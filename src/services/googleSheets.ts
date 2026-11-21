@@ -60,18 +60,35 @@ async function fetchData(action: string): Promise<any[]> {
   return data;
 }
 
+// Учёт записей в таблицу: фоновое обновление не должно затирать изменения руководителя,
+// которые уже показаны на экране, но ещё не записаны в таблицу.
+let pendingWrites = 0;
+let writeVersion = 0;
+
+/** Снимок состояния записей: если он изменился за время загрузки — результат устарел */
+export function getWriteState(): { pending: number; version: number } {
+  return { pending: pendingWrites, version: writeVersion };
+}
+
 async function postData(action: string, data: any): Promise<void> {
   const config = getConfig();
   if (!config.scriptUrl) throw new Error('Не настроено подключение');
-  const response = await fetch(config.scriptUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-    body: JSON.stringify({ action, data }),
-    redirect: 'follow'
-  });
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  const result = await response.json();
-  if (result.error) throw new Error(result.error);
+  pendingWrites++;
+  writeVersion++;
+  try {
+    const response = await fetch(config.scriptUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action, data }),
+      redirect: 'follow'
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const result = await response.json();
+    if (result.error) throw new Error(result.error);
+  } finally {
+    pendingWrites--;
+    writeVersion++;
+  }
 }
 
 // ==================== ТИПЫ ====================
