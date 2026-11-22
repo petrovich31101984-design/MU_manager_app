@@ -4649,7 +4649,7 @@ export default function App() {
 
   if (data.loading) {
     return (
-      <div className="min-h-screen bg-white flex items-center justify-center">
+      <div data-smu-loading className="min-h-screen bg-white flex items-center justify-center">
         <div className="text-center">
           <img src={LOGO_URL} alt="СМУ" className="w-48 h-48 object-contain mx-auto mb-6 animate-pulse" />
           <div className="text-slate-800 text-xl font-semibold mb-2">Загрузка данных...</div>
