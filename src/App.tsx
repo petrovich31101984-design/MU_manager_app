@@ -2364,10 +2364,12 @@ function createBalanceCalculator(data: Pick<ReturnType<typeof useData>, 'employe
   const { employees, nomenclature, arrivals, initialStocks, expenseSheets, returns } = data;
   const nameKey = (e: gs.Employee) => String(e.fullName ?? '').trim().toLowerCase();
 
-  // Все сотрудники, кроме уволенных; дубли по ФИО — одна колонка (первая запись)
+  // Все сотрудники, кроме уволенных и кладовщиков (у кладовщика нет остатков на руках);
+  // дубли по ФИО — одна колонка (первая запись)
   const seenNames = new Set<string>();
   const balanceEmployees = employees.filter(e => {
     if (e.status === 'Уволен') return false;
+    if (isStorekeeper(e)) return false;
     const key = nameKey(e);
     if (seenNames.has(key)) return false;
     seenNames.add(key);
