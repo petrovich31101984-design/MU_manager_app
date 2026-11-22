@@ -1712,7 +1712,9 @@ function ArchivePage({ data }: { data: ReturnType<typeof useData> }) {
   const [showArchiveList, setShowArchiveList] = useState(false);
   const [showFiredEmployees, setShowFiredEmployees] = useState(false);
   const [showArrivalsArchive, setShowArrivalsArchive] = useState(false);
-  
+  const [showAnnouncementsArchive, setShowAnnouncementsArchive] = useState(false);
+  const [editingAnnouncement, setEditingAnnouncement] = useState<gs.Announcement | null>(null);
+
   // Получение уволенных сотрудников
   const firedEmployees = employees.filter(e => e.status === 'Уволен');
 
@@ -1772,6 +1774,31 @@ function ArchivePage({ data }: { data: ReturnType<typeof useData> }) {
     const periodMonths = getPeriodMonths();
     return periodMonths.includes(a.month);
   });
+
+  // Архив объявлений: все объявления за период (и текущие, и снятые), новые сверху
+  const archivedAnnouncements = data.announcements
+    .filter(a => {
+      if (filterType === 'all') return true;
+      return getPeriodMonths().includes(String(a.date ?? '').slice(0, 7));
+    })
+    .sort((a, b) => String(b.date ?? '').localeCompare(String(a.date ?? '')));
+
+  const handleUpdateAnnouncement = async (id: string, updates: Partial<gs.Announcement>) => {
+    try {
+      await gs.updateAnnouncement(id, updates);
+      logAction(data, 'Объявления', id, 'Изменение', { newValue: updates.title ?? '' });
+      setEditingAnnouncement(null);
+      data.setAnnouncements(current => current.map(a => a.id === id ? { ...a, ...updates } : a));
+    } catch (error) {
+      console.error('Ошибка обновления объявления:', error);
+      alert('Ошибка при сохранении объявления. Попробуйте ещё раз.');
+    }
+  };
+
+  const recipientsLabel = (recipients: string[] = []) => [
+    recipients.includes('employees') ? 'Сотрудники' : '',
+    recipients.includes('warehouse') ? 'Кладовщик' : '',
+  ].filter(Boolean).join(', ') || 'Нет получателей';
 
   // Расчёт статистики
   const totalExpense = archivedSheets.reduce((sum, s) => sum + s.totalAmount, 0);
@@ -1876,8 +1903,8 @@ function ArchivePage({ data }: { data: ReturnType<typeof useData> }) {
       </div>
 
       {/* Карточки статистики */}
-      <div className="grid grid-cols-3 gap-4">
-        <div 
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div
           onClick={() => setShowArchiveList(true)}
           className="bg-white rounded-lg p-4 border border-slate-200 shadow-sm flex flex-col justify-between cursor-pointer hover:border-blue-500 hover:shadow-md transition-all"
         >
@@ -1902,6 +1929,15 @@ function ArchivePage({ data }: { data: ReturnType<typeof useData> }) {
           <div className="text-xs text-slate-500 uppercase mb-2">СОТРУДНИКИ</div>
           <div className="text-2xl font-bold text-red-600">{firedEmployees.length}</div>
           <div className="text-xs text-slate-500 mt-2 uppercase">Уволено</div>
+        </div>
+
+        <div
+          onClick={() => setShowAnnouncementsArchive(true)}
+          className="bg-white rounded-lg p-4 border border-slate-200 shadow-sm flex flex-col justify-between cursor-pointer hover:border-yellow-500 hover:shadow-md transition-all"
+        >
+          <div className="text-xs text-slate-500 uppercase mb-2">ОБЪЯВЛЕНИЯ</div>
+          <div className="text-2xl font-bold text-yellow-600">{archivedAnnouncements.length}</div>
+          <div className="text-xs text-slate-500 mt-2 uppercase">{getPeriodLabel()}</div>
         </div>
       </div>
 
@@ -2067,6 +2103,66 @@ function ArchivePage({ data }: { data: ReturnType<typeof useData> }) {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Модальное окно архива объявлений */}
+      {showAnnouncementsArchive && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-40 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="sticky top-0 bg-slate-100 px-6 py-4 flex justify-between items-center border-b border-slate-300">
+              <h2 className="text-xl font-bold text-slate-800">📢 Архив объявлений</h2>
+              <button
+                onClick={() => setShowAnnouncementsArchive(false)}
+                className="text-slate-600 hover:text-slate-800 text-2xl font-bold"
+              >
+                ×
+              </button>
+            </div>
+            <div className="p-6 space-y-3">
+              {archivedAnnouncements.length === 0 ? (
+                <div className="text-center text-slate-500 py-8">
+                  <div className="text-4xl mb-2">📢</div>
+                  <p>Нет объявлений за {getPeriodLabel().toLowerCase()}</p>
+                </div>
+              ) : (
+                archivedAnnouncements.map(announcement => (
+                  <div key={announcement.id} className="border border-slate-200 rounded-lg p-4 bg-white">
+                    <div className="flex justify-between items-start gap-3 mb-2">
+                      <h4 className="font-semibold text-slate-800 flex-1">{announcement.title}</h4>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className={`px-2 py-0.5 rounded-full text-xs ${announcement.active ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>
+                          {announcement.active ? 'Активно' : 'Снято'}
+                        </span>
+                        <span className="text-xs text-slate-500">
+                          {announcement.date ? new Date(announcement.date).toLocaleDateString('ru-RU') : ''}
+                        </span>
+                        <button
+                          onClick={() => setEditingAnnouncement(announcement)}
+                          className="px-3 py-1 rounded-lg text-sm text-blue-700 bg-blue-50 hover:bg-blue-100"
+                          title="Редактировать"
+                        >
+                          ✏️ Редактировать
+                        </button>
+                      </div>
+                    </div>
+                    <p className="text-sm text-slate-700 whitespace-pre-wrap">{announcement.text}</p>
+                    <div className="mt-2 text-xs text-slate-500">
+                      От: {announcement.createdBy} • Получатели: {recipientsLabel(announcement.recipients)}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {editingAnnouncement && (
+        <EditAnnouncementModal
+          announcement={editingAnnouncement}
+          onClose={() => setEditingAnnouncement(null)}
+          onUpdate={handleUpdateAnnouncement}
+        />
       )}
     </div>
   );
