@@ -389,7 +389,7 @@ function SettingsPage({ data }: { data: ReturnType<typeof useData> }) {
         <div className="p-5 space-y-2">
           <div className="flex justify-between py-2 border-b border-slate-100">
             <span className="text-sm text-slate-500">Приложение</span>
-            <span className="text-sm text-slate-800 font-semibold">СМУ (система медицинского учета)</span>
+            <span className="text-sm text-slate-800 font-semibold">СМУр (приложение для руководителя)</span>
           </div>
           <div className="flex justify-between py-2 border-b border-slate-100">
             <span className="text-sm text-slate-500">Версия</span>
