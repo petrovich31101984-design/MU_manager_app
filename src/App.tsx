@@ -3985,7 +3985,7 @@ function AddEmployeeModal({ employees, onClose, onAdd }: { employees: gs.Employe
             <label className="text-sm text-slate-600 mb-1 block">Должность *</label>
             <select value={form.position} onChange={e => setForm({ ...form, position: e.target.value })}
               className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-slate-800 focus:outline-none focus:border-blue-500">
-              <option>Врач</option><option>Фельдшер</option><option>Медсестра</option>
+              <option>Врач</option><option>Фельдшер</option><option>Медсестра</option><option>Кладовщик</option>
             </select>
           </div>
           <div>
@@ -4110,6 +4110,7 @@ function EditEmployeeModal({
               <option>Врач</option>
               <option>Фельдшер</option>
               <option>Медсестра</option>
+              <option>Кладовщик</option>
             </select>
           </div>
           <div>
