@@ -412,6 +412,22 @@ function SettingsPage({ data }: { data: ReturnType<typeof useData> }) {
 
 
 // ============ ЧАТ ============
+const isStorekeeper = (emp: { position?: string }) => /кладовщ/i.test(String(emp.position ?? ''));
+
+// Аватар в списке диалогов: у кладовщика — иконка склада, у остальных — первая буква ФИО
+function ChatAvatar({ emp }: { emp?: { fullName: string; position?: string } }) {
+  if (emp && isStorekeeper(emp)) {
+    return (
+      <div className="w-10 h-10 bg-amber-500 rounded-full flex items-center justify-center text-lg text-white shrink-0" title="Кладовщик">📦</div>
+    );
+  }
+  return (
+    <div className="w-10 h-10 bg-emerald-500 rounded-full flex items-center justify-center text-sm font-bold text-white shrink-0">
+      {emp?.fullName?.[0] || '?'}
+    </div>
+  );
+}
+
 function ChatPage({ data, focusEmployeeId, onFocusHandled }: {
   data: ReturnType<typeof useData>;
   focusEmployeeId?: string | null;
@@ -422,6 +438,10 @@ function ChatPage({ data, focusEmployeeId, onFocusHandled }: {
   // Фильтруем сотрудников: исключаем уволенных
   const activeEmployees = employees.filter(e => e.status !== 'Уволен');
   const sortedActiveEmployees = [...activeEmployees].sort((a, b) => {
+    // Кладовщик всегда первым в списке диалогов
+    const aStore = isStorekeeper(a) ? 0 : 1;
+    const bStore = isStorekeeper(b) ? 0 : 1;
+    if (aStore !== bStore) return aStore - bStore;
     const aUnread = chatMessages.some(message => message.fromId === a.id && !message.read) ? 0 : 1;
     const bUnread = chatMessages.some(message => message.fromId === b.id && !message.read) ? 0 : 1;
     if (aUnread !== bUnread) return aUnread - bUnread;
@@ -628,12 +648,12 @@ function ChatPage({ data, focusEmployeeId, onFocusHandled }: {
               
               return (
                 <button key={emp.id} onClick={handleOpenChat}
-                  className={`w-full p-4 flex items-center gap-3 text-left border-b border-slate-100 ${
-                    selectedChat === emp.id ? 'bg-red-50 border-l-4 border-l-red-500' : 'hover:bg-slate-50'
+                  className={`w-full p-4 flex items-center gap-3 text-left border-b ${
+                    isStorekeeper(emp) ? 'border-slate-200' : 'border-slate-100'
+                  } ${
+                    selectedChat === emp.id ? 'bg-red-50 border-l-4 border-l-red-500' : isStorekeeper(emp) ? 'bg-amber-50/50 hover:bg-slate-50' : 'hover:bg-slate-50'
                   }`}>
-                  <div className="w-10 h-10 bg-emerald-500 rounded-full flex items-center justify-center text-sm font-bold text-white">
-                    {emp.fullName[0]}
-                  </div>
+                  <ChatAvatar emp={emp} />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between">
                       <div className="text-sm font-medium text-slate-800 truncate">{formatFullName(emp.fullName)}</div>
@@ -643,7 +663,10 @@ function ChatPage({ data, focusEmployeeId, onFocusHandled }: {
                         </div>
                       )}
                     </div>
-                    <div className="mt-1">
+                    <div className="mt-1 flex items-center gap-1.5">
+                      {isStorekeeper(emp) && (
+                        <span className="inline-block px-2 py-0.5 rounded-full text-xs bg-amber-100 text-amber-800">Кладовщик</span>
+                      )}
                       <span className={`inline-block px-2 py-0.5 rounded-full text-xs ${status.color}`}>
                         {status.text}
                       </span>
@@ -666,9 +689,7 @@ function ChatPage({ data, focusEmployeeId, onFocusHandled }: {
           ) : (
             <>
               <div className="p-4 border-b border-slate-200 flex items-center gap-3">
-                <div className="w-10 h-10 bg-emerald-500 rounded-full flex items-center justify-center text-sm font-bold text-white">
-                  {activeEmployees.find(e => e.id === selectedChat)?.fullName[0] || '?'}
-                </div>
+                <ChatAvatar emp={activeEmployees.find(e => e.id === selectedChat)} />
                 <div>
                   <div className="font-medium text-slate-800">
                     {activeEmployees.find(e => e.id === selectedChat) ? formatFullName(activeEmployees.find(e => e.id === selectedChat)!.fullName) : ''}
