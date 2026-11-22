@@ -33,6 +33,20 @@ const isFresh = (atStart: { pending: number; version: number }) => {
   return atStart.pending === 0 && now.pending === 0 && now.version === atStart.version;
 };
 
+// Отправленные сообщения, которых ещё нет в ответе сервера. Запись в Google Таблицу
+// идёт несколько секунд, и автообновление чата затирало только что отправленное
+// сообщение (оно пропадало и появлялось снова). Держим их, пока сервер их не вернёт.
+const pendingChatMessages = new Map<string, gs.ChatMessage>();
+const mergeChatMessages = (server: gs.ChatMessage[], current: gs.ChatMessage[]): gs.ChatMessage[] => {
+  const serverIds = new Set(server.map(message => String(message.id)));
+  serverIds.forEach(id => pendingChatMessages.delete(id));
+  const merged = server.map(message => {
+    const localMessage = current.find(item => item.id === message.id);
+    return localMessage?.read && !message.read ? { ...message, read: true } : message;
+  });
+  return [...merged, ...Array.from(pendingChatMessages.values())];
+};
+
 function useData() {
   const [employees, setEmployees] = useState<gs.Employee[]>([]);
   const [nomenclature, setNomenclature] = useState<gs.Nomenclature[]>([]);
@@ -56,7 +70,7 @@ function useData() {
         gs.getExpenses(), gs.getExpenseSheets(), gs.getReturns(), gs.getChatMessages(), gs.getAnnouncements(), gs.getAuditLog(),
       ]);
       setEmployees(emps); setNomenclature(noms); setArrivals(arrs); setInitialStocks(stocks);
-      setExpenses(exps); setExpenseSheets(expSheets); setReturns(rets); setChatMessages(msgs); setAnnouncements(anns); setAuditLog(logs);
+      setExpenses(exps); setExpenseSheets(expSheets); setReturns(rets); setChatMessages(current => mergeChatMessages(msgs, current)); setAnnouncements(anns); setAuditLog(logs);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Ошибка загрузки');
     } finally { setLoading(false); }
@@ -78,10 +92,7 @@ function useData() {
         });
         const messagesRequest = gs.getChatMessages().then(messages => {
           if (active) {
-            setChatMessages(current => messages.map(message => {
-              const localMessage = current.find(item => item.id === message.id);
-              return localMessage?.read && !message.read ? { ...message, read: true } : message;
-            }));
+            setChatMessages(current => mergeChatMessages(messages, current));
           }
         });
         await Promise.all([employeesRequest, messagesRequest]);
@@ -495,12 +506,17 @@ function ChatPage({ data, focusEmployeeId, onFocusHandled }: {
     };
     
     // Добавляем сообщение в локальный state
-    data.setChatMessages([...data.chatMessages, newMsg]);
+    pendingChatMessages.set(newMsg.id, newMsg);
+    data.setChatMessages(current => [...current, newMsg]);
     setNewMessage('');
     
     // Отправляем в Google Sheets в фоне (без ожидания)
     gs.addChatMessage(newMsg).catch(err => {
       console.error('Ошибка отправки сообщения:', err);
+      // Сообщение не сохранилось — убираем его с экрана, текст возвращаем в поле ввода
+      pendingChatMessages.delete(newMsg.id);
+      data.setChatMessages(current => current.filter(message => message.id !== newMsg.id));
+      setNewMessage(newMsg.text);
       alert('Ошибка при отправке сообщения. Попробуйте ещё раз.');
     });
   };
