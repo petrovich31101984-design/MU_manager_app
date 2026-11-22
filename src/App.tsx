@@ -5,6 +5,27 @@ import * as gs from './services/googleSheets';
 const APP_VERSION = '0.5.5';
 
 // ============ ХУК ДЛЯ РАБОТЫ С ДАННЫМИ ============
+// ============ ЖУРНАЛ ИЗМЕНЕНИЙ ============
+// Действия руководителя записываются в лист «Журнал изменений» и сразу видны в разделе «Журнал».
+// Ошибка записи в журнал не мешает самому действию.
+function logAction(
+  data: { setAuditLog: React.Dispatch<React.SetStateAction<gs.AuditEntry[]>> },
+  sheet: string, recordId: string, action: string,
+  details: { field?: string; oldValue?: unknown; newValue?: unknown } = {},
+) {
+  const entry: gs.AuditEntry = {
+    id: `LOG-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    date: new Date().toISOString(),
+    userId: 'MGR', userName: 'Руководитель', role: 'Руководитель',
+    sheet, recordId, action,
+    field: details.field ?? '',
+    oldValue: details.oldValue === undefined ? '' : String(details.oldValue),
+    newValue: details.newValue === undefined ? '' : String(details.newValue),
+  };
+  data.setAuditLog(current => [...current, entry]);
+  gs.addAuditLog(entry).catch(err => console.error('Не удалось записать в журнал:', err));
+}
+
 // Результат фоновой загрузки можно применять, только если за это время ничего не сохранялось
 const isFresh = (atStart: { pending: number; version: number }) => {
   const now = gs.getWriteState();
@@ -47,7 +68,7 @@ function useData() {
     let updating = false;
 
     const refreshLiveData = async () => {
-      if (updating) return;
+      if (updating || !gs.isConnected()) return;
       updating = true;
       const writesAtStart = gs.getWriteState();
       try {
@@ -75,7 +96,7 @@ function useData() {
     // появлялся лишь после ручного обновления. Теперь — раз в 15 секунд и при возврате на вкладку.
     let updatingRecords = false;
     const refreshRecords = async () => {
-      if (updatingRecords || document.hidden) return;
+      if (updatingRecords || document.hidden || !gs.isConnected()) return;
       updatingRecords = true;
       const writesAtStart = gs.getWriteState();
       try {
@@ -446,18 +467,6 @@ function ChatPage({ data, focusEmployeeId, onFocusHandled }: {
     return { text: 'Не активен', color: 'bg-slate-100 text-slate-700' };
   };
 
-  // Отладка: выводим все сообщения
-  console.log('💬 ВСЕ СООБЩЕНИЯ:', chatMessages.map(m => ({
-    id: m.id,
-    fromId: m.fromId,
-    fromName: m.fromName,
-    toId: m.toId,
-    toName: m.toName,
-    text: m.text.substring(0, 50)
-  })));
-
-  console.log('🔍 ФИЛЬТР для сотрудника:', selectedChat, 'и руководителя MGR');
-
   // Более гибкий фильтр: проверяем разные варианты ID руководителя
   const isManagerId = (id: string) => id === 'MGR' || id === 'Руководитель' || id === 'Manager' || id === 'admin';
 
@@ -465,7 +474,6 @@ function ChatPage({ data, focusEmployeeId, onFocusHandled }: {
     (m.fromId === selectedChat && isManagerId(m.toId)) || (isManagerId(m.fromId) && m.toId === selectedChat)
   ).sort((a, b) => a.date.localeCompare(b.date));
 
-  console.log('✅ НАЙДЕНО СООБЩЕНИЙ:', chatWith.length);
 
   const sendMessage = async () => {
     if (!newMessage.trim() || !selectedChat) return;
@@ -498,8 +506,8 @@ function ChatPage({ data, focusEmployeeId, onFocusHandled }: {
   const handleCreateAnnouncement = async (announcement: { title: string; text: string; recipients: string[] }) => {
     try {
       const id = `ANN-${Date.now()}`;
-      console.log('📝 Создание объявления с ID:', id);
       await gs.createAnnouncement({ id, ...announcement });
+      logAction(data, 'Объявления', id, 'Создание', { newValue: announcement.title });
       setShowCreateAnnouncement(false);
       // Локальное обновление без перезагрузки
       const newAnnouncement: gs.Announcement = {
@@ -524,6 +532,7 @@ function ChatPage({ data, focusEmployeeId, onFocusHandled }: {
   const handleUpdateAnnouncement = async (id: string, updates: Partial<gs.Announcement>) => {
     try {
       await gs.updateAnnouncement(id, updates);
+      logAction(data, 'Объявления', id, 'Изменение', { newValue: updates.title ?? (updates.active === undefined ? '' : updates.active ? 'Активно' : 'Неактивно') });
       setEditingAnnouncement(null);
       // Локальное обновление без перезагрузки
       data.setAnnouncements(
@@ -535,23 +544,19 @@ function ChatPage({ data, focusEmployeeId, onFocusHandled }: {
   };
 
   const handleDeleteAnnouncement = async (id: string) => {
-    console.log('🗑️ Попытка удаления объявления с ID:', id);
     if (!id) {
       console.error('❌ ID объявления пустой!');
       alert('Ошибка: ID объявления не найден');
       return;
     }
     if (!confirm('Удалить это объявление?')) {
-      console.log('❌ Удаление отменено пользователем');
       return;
     }
     try {
-      console.log('📤 Отправка запроса на удаление...');
       await gs.deleteAnnouncement(id);
-      console.log('✅ Запрос на удаление отправлен успешно');
+      logAction(data, 'Объявления', id, 'Удаление');
       // Локальное обновление без перезагрузки
       data.setAnnouncements(data.announcements.filter(a => a.id !== id));
-      console.log('✅ Локальные данные обновлены');
     } catch (error) {
       console.error('❌ Ошибка удаления объявления:', error);
       alert('Ошибка при удалении объявления: ' + (error as Error).message);
@@ -861,14 +866,17 @@ function ArrivalCardModal({
   employees, 
   nomenclature,
   initialData,
-  onClose, 
-  onAdd 
-}: { 
-  employees: gs.Employee[]; 
+  defaultDate,
+  onClose,
+  onAdd
+}: {
+  employees: gs.Employee[];
   nomenclature: gs.Nomenclature[];
   initialData?: gs.Arrival;
-  onClose: () => void; 
-  onAdd: (form: any) => void 
+  /** Дата новой карты по умолчанию (для просматриваемого прошлого месяца — его 1-е число) */
+  defaultDate?: string;
+  onClose: () => void;
+  onAdd: (form: any) => void
 }) {
   type ArrivalItem = { nomenclatureId: string; quantity: number; price: number; total: number };
   const sortedEmployees = [...employees].sort((a, b) => {
@@ -882,7 +890,8 @@ function ArrivalCardModal({
 
   const [form, setForm] = useState({
     employeeId: initialData?.employeeId || sortedEmployees[0]?.id || '',
-    date: initialData?.date || new Date().toISOString().split('T')[0],
+    // Местное время: раньше дата бралась по UTC, и с 00:00 до 03:00 подставлялось вчерашнее число
+    date: gs.toDateInput(initialData?.date) || defaultDate || gs.todayLocal(),
     items: ((initialData as any)?.items || []) as ArrivalItem[]
   });
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
@@ -898,6 +907,8 @@ function ArrivalCardModal({
   }, [form.items.length]);
 
   const filteredNomenclature = nomenclature.filter(n => {
+    // Неактуальные позиции не предлагаются (кроме уже добавленных в редактируемую карту)
+    if (!n.active && !form.items.some((i: ArrivalItem) => i.nomenclatureId === n.id)) return false;
     const matchesCategory = selectedCategory === 'all' || n.category === selectedCategory;
     const matchesSearch = searchQuery === '' || 
       n.name.toLowerCase().includes(searchQuery.toLowerCase());
@@ -1149,8 +1160,6 @@ function AnnouncementsPanel({ announcements, onEdit, onDelete }: {
 }) {
   const activeAnnouncements = announcements.filter(a => a.active);
   
-  console.log('📢 Все объявления:', announcements);
-  console.log('✅ Активные объявления:', activeAnnouncements);
   
   if (activeAnnouncements.length === 0) return null;
 
@@ -1175,8 +1184,6 @@ function AnnouncementsPanel({ announcements, onEdit, onDelete }: {
             </button>
             <button
               onClick={() => {
-                console.log('🗑️ Нажата кнопка удаления для объявления:', latestAnnouncement);
-                console.log('🆔 ID объявления:', latestAnnouncement.id);
                 onDelete(latestAnnouncement.id);
               }}
               className="text-red-600 hover:text-red-800 text-sm"
@@ -1775,6 +1782,7 @@ function ArchivePage({ data }: { data: ReturnType<typeof useData> }) {
     setExpenseSheets(expenseSheets.map(s => s.id === id ? { ...s, archived: false } : s));
     try {
       await gs.restoreExpenseSheet(id);
+      logAction(data, 'Листы расхода', id, 'Восстановление из архива');
     } catch (err) {
       console.error('Ошибка восстановления:', err);
       alert('Ошибка при восстановлении. Попробуйте ещё раз.');
@@ -1787,6 +1795,7 @@ function ArchivePage({ data }: { data: ReturnType<typeof useData> }) {
     setArrivals(arrivals.map(a => a.id === id ? { ...a, archived: false } : a));
     try {
       await gs.restoreArrival(id);
+      logAction(data, 'Приход', id, 'Восстановление из архива');
     } catch (err) {
       console.error('Ошибка восстановления:', err);
       alert('Ошибка при восстановлении. Попробуйте ещё раз.');
@@ -2109,6 +2118,7 @@ function ExpensePage({ data, focusSheetId, onFocusHandled }: {
     setExpenseSheets(expenseSheets.map(s => s.id === id ? { ...s, archived: true } : s));
     try {
       await gs.archiveExpenseSheet(id);
+      logAction(data, 'Листы расхода', id, 'Архивирование');
     } catch (err) {
       console.error('Ошибка архивирования:', err);
       alert('Ошибка при архивировании. Попробуйте ещё раз.');
@@ -2187,10 +2197,14 @@ function ExpensePage({ data, focusSheetId, onFocusHandled }: {
           nomenclature={nomenclature}
           onClose={() => setEditingSheet(null)}
           onSave={(updatedSheet) => {
+            const original = expenseSheets.find(s => s.id === updatedSheet.id);
             setExpenseSheets(expenseSheets.map(s => s.id === updatedSheet.id ? updatedSheet : s));
+            logAction(data, 'Листы расхода', updatedSheet.id, 'Изменение', { newValue: `${updatedSheet.patientName} • ${updatedSheet.totalAmount} ₽` });
             gs.updateExpenseSheet(updatedSheet.id, updatedSheet).catch(err => {
               console.error('Ошибка обновления листа расхода:', err);
-              alert('Ошибка при обновлении листа расхода. Попробуйте ещё раз.');
+              // Не сохранилось — возвращаем лист как было
+              if (original) setExpenseSheets(current => current.map(s => s.id === original.id ? original : s));
+              alert('Ошибка при обновлении листа расхода. Изменения не сохранены, попробуйте ещё раз.');
             });
             setEditingSheet(null);
           }}
@@ -2307,6 +2321,7 @@ function ReturnsPage({ data }: { data: ReturnType<typeof useData> }) {
     } : x));
     try {
       await gs.updateReturn(r.id, decision);
+      logAction(data, 'Возвраты', r.id, decision.status, { field: decision.correctedQuantity != null ? 'Скорр. кол-во' : '', oldValue: decision.correctedQuantity != null ? r.quantity : undefined, newValue: decision.correctedQuantity ?? decision.comment ?? '' });
     } catch (err) {
       console.error('Ошибка сохранения возврата:', err);
       setReturns(previous);
@@ -2677,15 +2692,47 @@ function NomenclaturePage({ data }: { data: ReturnType<typeof useData> }) {
     setEditingItem(item);
   };
 
+  // Позиция уже есть в приходах, листах расхода, начальных остатках или возвратах?
+  // Тогда удалять нельзя: она пропала бы из остатков и отчётов, а в старых листах осталась бы без названия.
+  const isUsedInHistory = (item: gs.Nomenclature) => {
+    const matches = (x: any) => normId(x?.nomenclatureId) === normId(item.id) || (!!x?.name && x.name === item.name);
+    return data.arrivals.some(a => parseItems(a.items).some(matches))
+      || data.expenseSheets.some(s => parseItems(s.items).some(matches))
+      || data.initialStocks.some(s => normId(s.nomenclatureId) === normId(item.id))
+      || data.returns.some(r => normId(r.nomenclatureId) === normId(item.id));
+  };
+
   const handleDelete = async (id: string) => {
-    if (confirm('Удалить эту позицию из номенклатуры?')) {
-      // Удаляем из локального состояния
+    const item = nomenclature.find(n => n.id === id);
+    if (!item) return;
+
+    if (isUsedInHistory(item)) {
+      if (!item.active) {
+        alert(`«${item.name}» уже есть в истории (приходы, расход, остатки), поэтому удалить её нельзя.\nПозиция уже неактуальна и не предлагается в новых картах прихода.`);
+        return;
+      }
+      if (!confirm(`«${item.name}» уже есть в истории (приходы, расход, остатки), поэтому удалить её нельзя — иначе она пропадёт из остатков и отчётов.\n\nСделать позицию неактуальной? Она не будет предлагаться в новых картах прихода, но останется в истории.`)) return;
+      const previous = nomenclature;
+      const updatedItem = { ...item, active: false };
+      setNomenclature(nomenclature.map(n => n.id === id ? updatedItem : n));
+      logAction(data, 'Номенклатура', id, 'Изменение', { field: 'Актуальна', oldValue: 'ДА', newValue: 'НЕТ' });
+      gs.updateNomenclature(id, updatedItem).catch((err: Error) => {
+        console.error('Ошибка изменения номенклатуры:', err);
+        setNomenclature(previous);
+        alert('Не удалось сделать позицию неактуальной. Попробуйте ещё раз.');
+      });
+      return;
+    }
+
+    if (confirm(`Удалить «${item.name}» из номенклатуры?`)) {
+      const previous = nomenclature;
       setNomenclature(nomenclature.filter(n => n.id !== id));
-      
-      // Отправляем в Google Sheets в фоне
+      logAction(data, 'Номенклатура', id, 'Удаление', { newValue: item.name });
       gs.deleteNomenclature(id).catch((err: Error) => {
         console.error('Ошибка удаления номенклатуры:', err);
-        alert('Ошибка при удалении. Попробуйте ещё раз.');
+        // Удаление не прошло — возвращаем позицию на экран
+        setNomenclature(previous);
+        alert('Ошибка при удалении. Позиция не удалена, попробуйте ещё раз.');
       });
     }
   };
@@ -2817,6 +2864,7 @@ function NomenclaturePage({ data }: { data: ReturnType<typeof useData> }) {
           onClose={() => setShowAddModal(false)}
           onAdd={async (item: gs.Nomenclature) => {
             await gs.addNomenclature(item);
+            logAction(data, 'Номенклатура', item.id, 'Создание', { newValue: item.name });
             setNomenclature(current => [...current, item]);
             setShowAddModal(false);
           }}
@@ -2830,6 +2878,7 @@ function NomenclaturePage({ data }: { data: ReturnType<typeof useData> }) {
           onSave={async (updatedItem: gs.Nomenclature) => {
             setEditingItem(null);
             setNomenclature(nomenclature.map(n => n.id === updatedItem.id ? updatedItem : n));
+            logAction(data, 'Номенклатура', updatedItem.id, 'Изменение', { newValue: updatedItem.name });
             gs.updateNomenclature(updatedItem.id, updatedItem).catch((err: Error) => {
               console.error('Ошибка обновления номенклатуры:', err);
               alert('Ошибка при сохранении изменений. Попробуйте ещё раз.');
@@ -2991,11 +3040,13 @@ function ArrivalPage({ data }: { data: ReturnType<typeof useData> }) {
       id: `ARR-${Date.now()}`,
       ...form,
       date: form.date,
-      month: selectedMonth,
+      // Месяц — по дате карты, а не по месяцу на экране (иначе карта за 31.10 попадала в ноябрь)
+      month: gs.monthOf(form.date) || selectedMonth,
       addedBy: 'Руководитель',
       employeeName: form.employeeName || '',
     };
     setArrivals([...arrivals, newArrival]);
+    logAction(data, 'Приход', newArrival.id, 'Создание', { newValue: `${newArrival.employeeName} • ${newArrival.amount} ₽` });
     gs.addArrival(newArrival).catch(err => {
       console.error('Ошибка добавления прихода:', err);
       alert('Ошибка при добавлении прихода. Попробуйте ещё раз.');
@@ -3028,10 +3079,12 @@ function ArrivalPage({ data }: { data: ReturnType<typeof useData> }) {
     const updatedArrival = {
       ...editingArrival,
       ...form,
+      month: gs.monthOf(form.date) || editingArrival.month,
       employeeName: form.employeeName || editingArrival.employeeName || '',
     };
     
     setArrivals(arrivals.map(a => a.id === editingArrival.id ? updatedArrival : a));
+    logAction(data, 'Приход', editingArrival.id, 'Изменение', { oldValue: `${editingArrival.amount} ₽`, newValue: `${updatedArrival.amount} ₽` });
     gs.updateArrival(editingArrival.id, updatedArrival).catch(err => {
       console.error('Ошибка обновления прихода:', err);
       alert('Ошибка при обновлении прихода. Попробуйте ещё раз.');
@@ -3041,6 +3094,7 @@ function ArrivalPage({ data }: { data: ReturnType<typeof useData> }) {
   const handleDeleteArrival = async (id: string) => {
     if (!confirm('Удалить эту карту прихода?')) return;
     setArrivals(arrivals.filter(a => a.id !== id));
+    logAction(data, 'Приход', id, 'Удаление');
     gs.deleteArrival(id).catch(err => {
       console.error('Ошибка удаления прихода:', err);
       alert('Ошибка при удалении прихода. Попробуйте ещё раз.');
@@ -3051,6 +3105,7 @@ function ArrivalPage({ data }: { data: ReturnType<typeof useData> }) {
   const handleArchiveArrival = async (id: string) => {
     if (!confirm('Отправить карту прихода в архив?')) return;
     setArrivals(arrivals.map(a => a.id === id ? { ...a, archived: true } : a));
+    logAction(data, 'Приход', id, 'Архивирование');
     gs.archiveArrival(id).catch(err => {
       console.error('Ошибка архивирования прихода:', err);
       alert('Ошибка при архивировании прихода. Попробуйте ещё раз.');
@@ -3153,9 +3208,10 @@ function ArrivalPage({ data }: { data: ReturnType<typeof useData> }) {
         )}
       </div>
 
-      {showAddArrival && <ArrivalCardModal 
-        employees={employees.filter(e => e.status !== 'Уволен')} 
+      {showAddArrival && <ArrivalCardModal
+        employees={employees.filter(e => e.status !== 'Уволен')}
         nomenclature={nomenclature}
+        defaultDate={selectedMonth === currentMonth ? undefined : `${selectedMonth}-01`}
         onClose={() => setShowAddArrival(false)} 
         onAdd={handleAddArrival} 
       />}
@@ -3192,11 +3248,13 @@ function EditExpenseSheetModal({
   onClose: () => void;
   onSave: (sheet: gs.ExpenseSheet) => void;
 }) {
+  // Поля даты принимают только «ГГГГ-ММ-ДД»: из таблицы дата листа приходит с временем,
+  // а дата рождения — как «ДД.ММ.ГГГГ», поэтому раньше поля открывались пустыми
   const [formData, setFormData] = useState({
-    date: sheet.date,
+    date: gs.toDateInput(sheet.date),
     employeeId: sheet.employeeId,
     patientName: sheet.patientName,
-    patientBirthDate: sheet.patientBirthDate,
+    patientBirthDate: gs.toDateInput(sheet.patientBirthDate) || sheet.patientBirthDate,
     callCategory: sheet.callCategory,
     therapyName: sheet.therapyName,
     therapyCost: sheet.therapyCost,
@@ -3252,9 +3310,13 @@ function EditExpenseSheetModal({
       const pricePerUnit = Number(item.pricePerUnit) || 0;
       return { ...item, quantity, pricePerUnit, total: quantity * pricePerUnit };
     });
+    // Дату не меняли — оставляем исходную вместе со временем (по ней сортируется список)
+    const date = formData.date === gs.toDateInput(sheet.date) ? sheet.date : formData.date;
     const updatedSheet: gs.ExpenseSheet = {
       ...sheet,
-      date: formData.date,
+      date,
+      // Лист переезжает в месяц новой даты
+      month: gs.monthOf(date) || sheet.month,
       employeeId: formData.employeeId,
       employeeName: employees.find(e => e.id === formData.employeeId)?.fullName || '',
       patientName: formData.patientName,
@@ -3541,7 +3603,7 @@ function EmployeesPage({ data }: { data: ReturnType<typeof useData> }) {
       password: form.password.trim(),
       status: 'Неактивен',
       position: form.position,
-      hireDate: new Date().toISOString().split('T')[0],
+      hireDate: gs.todayLocal(),
       blocked: false,
       phone: form.phone.trim(),
       lastActivity: '',
@@ -3550,6 +3612,7 @@ function EmployeesPage({ data }: { data: ReturnType<typeof useData> }) {
     };
 
     await gs.addEmployee(newEmployee);
+    logAction(data, 'Сотрудники', newEmployee.id, 'Создание', { newValue: newEmployee.fullName });
     setEmployees(current => [...current, newEmployee]);
     setShowAdd(false);
   };
@@ -3568,6 +3631,7 @@ function EmployeesPage({ data }: { data: ReturnType<typeof useData> }) {
       : { blocked: false };
     try {
       await gs.updateEmployee(id, updates);
+      logAction(data, 'Сотрудники', id, updates.blocked ? 'Блокировка' : 'Разблокировка');
       setEmployees(current => current.map(e => e.id === id ? { ...e, ...updates } : e));
     } catch (err) {
       console.error('Ошибка блокировки сотрудника:', err);
@@ -3583,6 +3647,7 @@ function EmployeesPage({ data }: { data: ReturnType<typeof useData> }) {
     setShiftUpdatingId(id);
     try {
       await gs.updateEmployeeShift(id, open);
+      logAction(data, 'Сотрудники', id, open ? 'Открытие смены' : 'Закрытие смены');
       setEmployees(current => current.map(e => e.id === id
         ? { ...e, shiftOpen: open, status: open ? 'Активен' : 'Неактивен' }
         : e
@@ -3603,9 +3668,12 @@ function EmployeesPage({ data }: { data: ReturnType<typeof useData> }) {
       setEmployees(employees.map(e => e.id === id ? { ...e, status: 'Уволен', personalNumber: '' } : e));
       
       // Отправляем в Google Sheets в фоне
+      logAction(data, 'Сотрудники', id, 'Увольнение', { newValue: emp?.fullName });
       gs.updateEmployee(id, { status: 'Уволен', personalNumber: '' }).catch(err => {
         console.error('Ошибка увольнения сотрудника:', err);
-        alert('Ошибка при увольнении сотрудника. Попробуйте ещё раз.');
+        // Не сохранилось — возвращаем сотрудника как было
+        if (emp) setEmployees(current => current.map(e => e.id === id ? emp : e));
+        alert('Ошибка при увольнении сотрудника. Изменение не сохранено, попробуйте ещё раз.');
       });
     }
   };
@@ -3618,9 +3686,12 @@ function EmployeesPage({ data }: { data: ReturnType<typeof useData> }) {
       data.setEmployees(employees.filter(e => e.id !== id));
       
       // Удаляем из Google Sheets в фоне (без ожидания)
+      logAction(data, 'Сотрудники', id, 'Удаление', { newValue: emp?.fullName });
       gs.deleteEmployee(id).catch(err => {
         console.error('Ошибка удаления сотрудника:', err);
-        alert('Ошибка при удалении сотрудника. Попробуйте ещё раз.');
+        // Не удалилось — возвращаем сотрудника в список
+        if (emp) data.setEmployees(current => current.some(e => e.id === id) ? current : [...current, emp]);
+        alert('Ошибка при удалении сотрудника. Сотрудник не удалён, попробуйте ещё раз.');
       });
     }
   };
@@ -3789,6 +3860,7 @@ function EmployeesPage({ data }: { data: ReturnType<typeof useData> }) {
             setEmployees(employees.map(e => e.id === id ? { ...e, ...updates } : e));
             
             // Отправляем в Google Sheets в фоне
+            logAction(data, 'Сотрудники', id, 'Изменение', { newValue: updates.fullName });
             gs.updateEmployee(id, updates).catch(err => {
               console.error('Ошибка обновления сотрудника:', err);
               alert('Ошибка при сохранении изменений. Попробуйте ещё раз.');

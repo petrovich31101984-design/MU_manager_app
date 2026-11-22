@@ -39,7 +39,6 @@ export async function testConnection(): Promise<{ success: boolean; title?: stri
     const response = await fetch(`${config.scriptUrl}?action=test`);
     if (!response.ok) return { success: false, error: `Ошибка ${response.status}` };
     const data = await response.json();
-    console.log('🔍 Результат testConnection:', data);
     if (data.error) return { success: false, error: data.error };
     return { success: true, title: data.title, sheets: data.sheets };
   } catch (error) {
@@ -50,12 +49,9 @@ export async function testConnection(): Promise<{ success: boolean; title?: stri
 async function fetchData(action: string): Promise<any[]> {
   const config = getConfig();
   if (!config.scriptUrl) throw new Error('Не настроено подключение');
-  console.log(`🔗 Запрос к Apps Script: action=${action}`);
   const response = await fetch(`${config.scriptUrl}?action=${action}`);
-  console.log(`📡 Ответ от Apps Script для ${action}:`, response.status);
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   const data = await response.json();
-  console.log(`📦 Данные от Apps Script для ${action}:`, data);
   if (data.error) throw new Error(data.error);
   return data;
 }
@@ -194,7 +190,8 @@ export async function getNomenclature(): Promise<Nomenclature[]> {
     return {
       id: row['ID'] || '', name: row['Название'] || '',
       category: row['Категория'] || 'Лекарство', unit: row['Ед. измерения'] || 'Штуки',
-      manufacturer: row['Производитель'] || '', active: row['Актуальна'] === 'ДА',
+      // Неактуальна только при явном «НЕТ» (пустое поле — актуальна)
+      manufacturer: row['Производитель'] || '', active: String(row['Актуальна'] ?? '').trim().toUpperCase() !== 'НЕТ',
       currentPrice: parseFloat(priceRow?.['Цена за ед. (₽)'] || '0'),
       packageQuantity: parseInt(row['Количество в упаковке'] || '1'),
     };
@@ -277,43 +274,21 @@ export async function updateReturn(id: string, decision: {
 }
 
 export async function getChatMessages(): Promise<ChatMessage[]> {
-  console.log('📥 Загрузка сообщений из Google Sheets...');
-  
-  // Пробуем разные возможные названия листов
-  const possibleSheetNames = ['Чат', 'Chat', 'Сообщения', 'Messages', 'Чаты', 'Chats'];
-  
-  for (const sheetName of possibleSheetNames) {
-    console.log(`🔍 Пробуем прочитать из листа: "${sheetName}"`);
-    try {
-      const config = getConfig();
-      const url = `${config.scriptUrl}?action=getChat&sheet=${sheetName}`;
-      const response = await fetch(url);
-      const data = await response.json();
-      
-      console.log(`📊 Лист "${sheetName}" вернул:`, data.length, 'записей');
-      
-      if (data.length > 0) {
-        console.log(`✅ Найдены сообщения в листе "${sheetName}"!`);
-        return data.map((row: any) => ({
-          id: row['ID'] || '', 
-          fromId: row['От кого (ID)'] || '', 
-          fromName: row['От кого (ФИО)'] || '',
-          toId: row['Кому (ID)'] || '', 
-          toName: row['Кому (ФИО)'] || '',
-          role: row['Роль'] || 'Сотрудник', 
-          text: row['Текст'] || '',
-          date: row['Дата и время'] || '', 
-          read: String(row['Прочитано'] || '').toUpperCase().trim() === 'ДА',
-          priority: row['Приоритет'] || 'Обычное',
-        }));
-      }
-    } catch (error) {
-      console.log(`❌ Ошибка чтения из листа "${sheetName}":`, error);
-    }
-  }
-  
-  console.log('⚠️ Не найдено сообщений ни в одном из листов');
-  return [];
+  // Один запрос: скрипт всегда читает лист «Чат». Раньше при пустом чате приложение
+  // каждые 5 секунд делало 6 одинаковых запросов, перебирая названия листа.
+  const data = await fetchData('getChat');
+  return data.map((row: any) => ({
+    id: row['ID'] || '',
+    fromId: row['От кого (ID)'] || '',
+    fromName: row['От кого (ФИО)'] || '',
+    toId: row['Кому (ID)'] || '',
+    toName: row['Кому (ФИО)'] || '',
+    role: row['Роль'] || 'Сотрудник',
+    text: row['Текст'] || '',
+    date: row['Дата и время'] || '',
+    read: String(row['Прочитано'] || '').toUpperCase().trim() === 'ДА',
+    priority: row['Приоритет'] || 'Обычное',
+  }));
 }
 
 export async function getAuditLog(): Promise<AuditEntry[]> {
@@ -437,7 +412,51 @@ export async function restoreArrival(id: string): Promise<void> {
 export async function addExpenseSheet(sheet: Partial<ExpenseSheet>): Promise<void> {
   await postData('addExpenseSheet', sheet);
 }
-export async function updateExpenseSheet(id: string, data: Partial<ExpenseSheet>): Promise<void> {
+/** Месяц ('ГГГГ-ММ') по дате — в местном времени (не UTC, иначе ночью получается вчерашний день) */
+export function monthOf(date: string | Date): string {
+  const d = typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date)
+    ? new Date(`${date}T12:00:00`)
+    : new Date(date);
+  if (isNaN(d.getTime())) return '';
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
+/** Дата для поля ввода даты ('ГГГГ-ММ-ДД', местное время) — из таблицы она приходит как ISO с временем */
+export function toDateInput(value: string | undefined): string {
+  if (!value) return '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  // «ДД.ММ.ГГГГ» — так дату рождения пациента пишет приложение сотрудника
+  const ru = String(value).match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
+  if (ru) return `${ru[3]}-${ru[2]}-${ru[1]}`;
+  const d = new Date(value);
+  if (isNaN(d.getTime())) return '';
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/** Сегодняшняя дата 'ГГГГ-ММ-ДД' в местном времени */
+export function todayLocal(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+export async function updateExpenseSheet(id: string, sheet: Partial<ExpenseSheet>): Promise<void> {
+  // Скрипт пишет только поля с названиями колонок таблицы — раньше уходили английские
+  // названия, и сохранялся лишь список препаратов, остальные правки терялись.
+  const data: Record<string, any> = {};
+  if (sheet.employeeId !== undefined) data['Сотрудник_ID'] = sheet.employeeId;
+  if (sheet.employeeName !== undefined) data['Сотрудник'] = sheet.employeeName;
+  if (sheet.patientName !== undefined) data['Пациент'] = sheet.patientName;
+  if (sheet.patientBirthDate !== undefined) data['Дата рождения пациента'] = sheet.patientBirthDate;
+  if (sheet.date !== undefined) {
+    data['Дата'] = sheet.date;
+    const month = monthOf(sheet.date);
+    if (month) data['Месяц'] = month;
+  }
+  if (sheet.callCategory !== undefined) data['Категория выезда'] = sheet.callCategory;
+  if (sheet.therapyName !== undefined) data['Название терапии'] = sheet.therapyName;
+  if (sheet.therapyCost !== undefined) data['Стоимость терапии'] = sheet.therapyCost;
+  if (sheet.totalAmount !== undefined) data['Итого по препаратам'] = sheet.totalAmount;
+  if (sheet.items !== undefined) data.items = sheet.items;
   await postData('updateExpenseSheet', { id, data });
 }
 export async function archiveExpenseSheet(id: string): Promise<void> {
@@ -466,7 +485,6 @@ export async function updateChatMessage(id: string, updates: { read?: boolean; [
   await postData('updateChatMessage', { id, ...sheetUpdates });
 }
 export async function createAnnouncement(announcement: { id: string; title: string; text: string; recipients: string[] }): Promise<void> {
-  console.log('📤 Создание объявления:', announcement);
   await postData('createAnnouncement', {
     'ID': announcement.id,
     'Заголовок': announcement.title,
@@ -488,13 +506,24 @@ export async function updateAnnouncement(id: string, updates: Partial<Announceme
 }
 
 export async function deleteAnnouncement(id: string): Promise<void> {
-  console.log('📤 Удаление объявления ID:', id);
-  console.log('📦 Отправляемые данные:', { 'ID': id });
   await postData('deleteAnnouncement', { 'ID': id });
-  console.log('✅ Запрос на удаление отправлен');
 }
 export async function addAuditLog(log: Partial<AuditEntry>): Promise<void> {
-  await postData('addAuditLog', log);
+  // Скрипт пишет строку по названиям колонок листа «Журнал изменений»
+  await postData('addAuditLog', {
+    'ID': log.id || `LOG-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    'Дата и время': log.date || new Date().toISOString(),
+    'Пользователь ID': log.userId ?? 'MGR',
+    'Пользователь ФИО': log.userName ?? 'Руководитель',
+    'Роль': log.role ?? 'Руководитель',
+    'Лист': log.sheet ?? '',
+    'Запись_ID': log.recordId ?? '',
+    'Действие': log.action ?? '',
+    'Поле': log.field ?? '',
+    'Было': log.oldValue ?? '',
+    'Стало': log.newValue ?? '',
+    'Устройство': 'Приложение руководителя',
+  });
 }
 export async function clearAuditLog(): Promise<void> {
   await postData('clearAuditLog', {});
