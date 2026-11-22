@@ -4714,7 +4714,7 @@ export default function App() {
             <div className="overflow-hidden">
               <h1 className="text-sm font-bold whitespace-nowrap"><span className="text-blue-600">СМУ</span></h1>
               <p className="text-xs text-slate-500 leading-tight">Система медицинского учета</p>
-              <p className="text-xs text-emerald-600 font-semibold">(v. {APP_VERSION})</p>
+              <p className="text-xs text-emerald-600 font-semibold">(v.{APP_VERSION})</p>
             </div>
           )}
         </div>
