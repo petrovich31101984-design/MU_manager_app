@@ -2688,9 +2688,8 @@ function BalancePage({ data }: { data: ReturnType<typeof useData> }) {
                         </td>
                       );
                     })}
-                    <td className="px-3 py-3 text-sm text-left border border-slate-300 bg-slate-200 text-slate-800 sticky right-[130px] z-11" style={{ minWidth: '110px', boxShadow: 'inset 1px 0 0 0 #cbd5e1, inset -1px 0 0 0 #cbd5e1, -2px 0 4px -1px rgba(0,0,0,0.2)' }}>
-                      {nomenclature.reduce((sum, item) => sum + calculateTotalQuantity(item.id), 0)}
-                    </td>
+                    {/* Сумма количеств разных позиций смысла не имеет — ячейка пустая */}
+                    <td className="px-3 py-3 text-sm text-left border border-slate-300 bg-slate-200 text-slate-800 sticky right-[130px] z-11" style={{ minWidth: '110px', boxShadow: 'inset 1px 0 0 0 #cbd5e1, inset -1px 0 0 0 #cbd5e1, -2px 0 4px -1px rgba(0,0,0,0.2)' }}></td>
                     <td className={`px-3 py-3 text-sm text-left border border-slate-300 bg-slate-200 sticky right-0 z-12 ${calculateGrandTotal() > 0 ? 'text-emerald-600' : calculateGrandTotal() < 0 ? 'text-red-600' : 'text-slate-400'}`} style={{ minWidth: '130px', boxShadow: 'inset 1px 0 0 0 #cbd5e1, -2px 0 4px -1px rgba(0,0,0,0.2)' }}>
                       {calculateGrandTotal().toLocaleString('ru-RU')} ₽
                     </td>
