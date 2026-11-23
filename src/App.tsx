@@ -5365,7 +5365,8 @@ function Dashboard({ data, onOpenSheet, onOpenChat, onOpenReturns }: {
   const lastMonthNameNominative = lastMonthDate.toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' });
   const currentMonthNameNominative = now.toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' });
   
-  const activeEmployees = employees.filter(e => e.status === 'Активен');
+  // Кладовщик в «Активных сотрудников» не учитывается — считаем только выездных сотрудников
+  const activeEmployees = employees.filter(e => e.status === 'Активен' && !isStorekeeper(e));
 
   // Тот же расчёт и тот же список сотрудников, что и в «Остаток у сотрудника»
   const { balanceEmployees, getEmployeeIds, calculateEmployeeValue } = createBalanceCalculator(data);
