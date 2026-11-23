@@ -5086,15 +5086,15 @@ export default function App() {
               {menuItems.find(m => m.id === currentPage)?.label}
             </h2>
           </div>
+          {/* Новогодняя гирлянда между названием раздела и датой: занимает всё место между ними,
+              лишние лампочки обрезаются по ширине; клики проходят сквозь неё */}
+          <div className="new-year-garland mx-6" aria-hidden="true">
+            {Array.from({ length: 80 }, (_, i) => <span key={i} className="garland-bulb" />)}
+          </div>
           <div className="flex items-center gap-3">
             <div className="text-sm text-slate-500 hidden md:block">
               {new Date().toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric', month: 'short' })}
             </div>
-          </div>
-          {/* Новогодняя гирлянда: провод с мигающими лампочками свисает с нижнего края шапки.
-              Лишние лампочки обрезаются по ширине; клики проходят сквозь неё */}
-          <div className="new-year-garland" aria-hidden="true">
-            {Array.from({ length: 80 }, (_, i) => <span key={i} className="garland-bulb" />)}
           </div>
         </header>
         <main className="p-6 overflow-hidden max-w-full">{renderPage()}</main>

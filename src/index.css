@@ -30,13 +30,11 @@
   55% { stroke-dashoffset: 0; }
   100% { stroke-dashoffset: -100; }
 }
-/* Новогодняя гирлянда под шапкой: провод провисает дугами по 40px,
+/* Новогодняя гирлянда в шапке между названием раздела и датой: провод провисает дугами по 40px,
    в нижней точке каждой дуги — лампочка; цвета чередуются, огни «бегут» волной */
 .new-year-garland {
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 100%;
+  flex: 1 1 0;
+  min-width: 0;
   height: 28px;
   overflow: hidden;
   pointer-events: none;
