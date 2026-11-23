@@ -417,6 +417,16 @@ const glintPath = (cx: number, cy: number, s: number) =>
 // Золотые блики: [x, y, размер]
 const GARLAND_GLINTS: Array<[number, number, number]> = [[36, 28, 4], [97, 24, 5], [144, 16, 4], [18, 12, 3], [162, 40, 3], [80, 41, 3.5], [192, 14, 4]];
 
+// Цвета шаров: [блик, основной, тень] — красный, синий, золотой, фиолетовый, серебряный, розовый.
+// В каждом фрагменте гирлянды три шара разных цветов, соседние фрагменты — со сдвигом.
+const GARLAND_BALL_COLORS: Array<[string, string, string]> = [
+  ['#fca5a5', '#dc2626', '#7f1d1d'],
+  ['#93c5fd', '#2563eb', '#1e3a8a'],
+  ['#fef08a', '#eab308', '#854d0e'],
+  ['#d8b4fe', '#9333ea', '#4c1d95'],
+  ['#ffffff', '#cbd5e1', '#64748b'],
+  ['#fbcfe8', '#db2777', '#831843'],
+];
 function GarlandTile({ index }: { index: number }) {
   return (
     <svg width={GARLAND_TILE_W} height={GARLAND_H} viewBox={`0 0 ${GARLAND_TILE_W} ${GARLAND_H}`} overflow="visible" className="shrink-0">
@@ -428,11 +438,11 @@ function GarlandTile({ index }: { index: number }) {
         <ellipse cx="66" cy="18" rx="5" ry="8" fill="#78350f" />
         <path d="M61.5 14q4.5 2 9 0M61 18q5 2 10 0M61.5 22q4.5 2 9 0" stroke="#b45309" strokeWidth="1" fill="none" />
       </g>
-      {/* Красные шары с бликом и золотым колпачком */}
-      {[[40, 34, 9], [140, 22, 8], [112, 42, 6]].map(([cx, cy, r]) => (
+      {/* Разноцветные шары с бликом и золотым колпачком */}
+      {[[40, 34, 9], [140, 22, 8], [112, 42, 6]].map(([cx, cy, r], j) => (
         <g key={`${cx}`}>
           <rect x={cx - 2} y={cy - r - 2.5} width="4" height="3" rx="0.8" fill="url(#garland-gold)" />
-          <circle cx={cx} cy={cy} r={r} fill="url(#garland-ball)" />
+          <circle cx={cx} cy={cy} r={r} fill={`url(#garland-ball-${(index * 3 + j) % GARLAND_BALL_COLORS.length})`} />
           <ellipse cx={cx - r * 0.35} cy={cy - r * 0.4} rx={r * 0.28} ry={r * 0.18} fill="#fff" opacity="0.75" transform={`rotate(-30 ${cx - r * 0.35} ${cy - r * 0.4})`} />
         </g>
       ))}
@@ -461,11 +471,13 @@ function NewYearGarland() {
       {/* Общие градиенты и тень для всех фрагментов */}
       <svg width="0" height="0" className="absolute">
         <defs>
-          <radialGradient id="garland-ball" cx="35%" cy="30%" r="75%">
-            <stop offset="0%" stopColor="#fca5a5" />
-            <stop offset="35%" stopColor="#dc2626" />
-            <stop offset="100%" stopColor="#7f1d1d" />
-          </radialGradient>
+          {GARLAND_BALL_COLORS.map(([light, mid, dark], i) => (
+            <radialGradient key={i} id={`garland-ball-${i}`} cx="35%" cy="30%" r="75%">
+              <stop offset="0%" stopColor={light} />
+              <stop offset="35%" stopColor={mid} />
+              <stop offset="100%" stopColor={dark} />
+            </radialGradient>
+          ))}
           <linearGradient id="garland-gold" x1="0" y1="0" x2="1" y2="1">
             <stop offset="0%" stopColor="#fef08a" />
             <stop offset="50%" stopColor="#eab308" />
