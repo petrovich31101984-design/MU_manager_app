@@ -5370,7 +5370,8 @@ function Dashboard({ data, onOpenSheet, onOpenChat, onOpenReturns }: {
 
   // Тот же расчёт и тот же список сотрудников, что и в «Остаток у сотрудника»
   const { balanceEmployees, getEmployeeIds, calculateEmployeeValue } = createBalanceCalculator(data);
-  const summaryEmployees = [...balanceEmployees].sort((a, b) => {
+  // Кладовщика в сводке не показываем — только выездные сотрудники
+  const summaryEmployees = balanceEmployees.filter(e => !isStorekeeper(e)).sort((a, b) => {
     const aNumber = String(a.personalNumber ?? '').trim();
     const bNumber = String(b.personalNumber ?? '').trim();
     if (!aNumber && !bNumber) return 0;
