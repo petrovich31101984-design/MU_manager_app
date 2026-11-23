@@ -346,7 +346,135 @@ function AuditPage({ data }: { data: ReturnType<typeof useData> }) {
 }
 
 // ============ НАСТРОЙКИ ============
-function SettingsPage({ data }: { data: ReturnType<typeof useData> }) {
+// ============ ДЕКОРИРОВАНИЕ ПРИЛОЖЕНИЯ ============
+// Настройки оформления хранятся в браузере этого компьютера (localStorage), в таблицу не пишутся.
+type DecorSettings = { garland: boolean };
+const DECOR_KEY = 'smu-pc-decor';
+const loadDecor = (): DecorSettings => {
+  try {
+    const saved = JSON.parse(localStorage.getItem(DECOR_KEY) || '{}');
+    return { garland: saved.garland === true };
+  } catch {
+    return { garland: false };
+  }
+};
+const saveDecor = (value: DecorSettings) => {
+  try { localStorage.setItem(DECOR_KEY, JSON.stringify(value)); } catch { /* хранилище недоступно — действует до перезагрузки */ }
+};
+
+// Хвойная гирлянда: ветки рисуются иглами из псевдослучайных (но всегда одинаковых) штрихов,
+// на них красные шары, золотые звёзды, белые снежинки, шишки и мерцающие золотые блики.
+// Один фрагмент шириной GARLAND_TILE_W повторяется по всей ширине; лишнее обрезается.
+const GARLAND_TILE_W = 200;
+const GARLAND_H = 52;
+const GARLAND_NEEDLES: string[] = (() => {
+  let seed = 7;
+  const rand = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  const layers: string[][] = [[], [], [], []];
+  for (let x = -8; x <= GARLAND_TILE_W + 8; x += 2.5) {
+    // Ось ветки слегка волнистая; период волны = ширине фрагмента, чтобы стыки совпадали
+    const cy = 26 + Math.sin((x / GARLAND_TILE_W) * Math.PI * 2) * 3;
+    for (let k = 0; k < 5; k++) {
+      const angle = rand() * Math.PI * 2;
+      const len = 8 + rand() * 9;
+      const x1 = x + (rand() - 0.5) * 4;
+      const y1 = cy + (rand() - 0.5) * 6;
+      const x2 = x1 + Math.cos(angle) * len * 1.3;
+      const y2 = Math.min(GARLAND_H - 3, Math.max(3, y1 + Math.sin(angle) * len));
+      layers[Math.floor(rand() * 4)].push(`M${x1.toFixed(1)} ${y1.toFixed(1)}L${x2.toFixed(1)} ${y2.toFixed(1)}`);
+    }
+  }
+  return layers.map(l => l.join(''));
+})();
+const NEEDLE_STYLES = [
+  { stroke: '#14532d', width: 1.7 },
+  { stroke: '#166534', width: 1.5 },
+  { stroke: '#15803d', width: 1.3 },
+  { stroke: '#22c55e', width: 0.9 }, // светлые иглы
+];
+const starPath = (cx: number, cy: number, r: number) => {
+  const pts: string[] = [];
+  for (let i = 0; i < 10; i++) {
+    const rad = i % 2 === 0 ? r : r * 0.45;
+    const a = -Math.PI / 2 + (i * Math.PI) / 5;
+    pts.push(`${(cx + Math.cos(a) * rad).toFixed(1)},${(cy + Math.sin(a) * rad).toFixed(1)}`);
+  }
+  return `M${pts.join('L')}Z`;
+};
+const glintPath = (cx: number, cy: number, s: number) =>
+  `M${cx} ${cy - s}Q${cx} ${cy} ${cx + s} ${cy}Q${cx} ${cy} ${cx} ${cy + s}Q${cx} ${cy} ${cx - s} ${cy}Q${cx} ${cy} ${cx} ${cy - s}Z`;
+// Золотые блики: [x, y, размер]
+const GARLAND_GLINTS: Array<[number, number, number]> = [[36, 28, 4], [97, 24, 5], [144, 16, 4], [18, 12, 3], [162, 40, 3], [80, 41, 3.5], [192, 14, 4]];
+
+function GarlandTile({ index }: { index: number }) {
+  return (
+    <svg width={GARLAND_TILE_W} height={GARLAND_H} viewBox={`0 0 ${GARLAND_TILE_W} ${GARLAND_H}`} overflow="visible" className="shrink-0">
+      {GARLAND_NEEDLES.map((d, i) => (
+        <path key={i} d={d} stroke={NEEDLE_STYLES[i].stroke} strokeWidth={NEEDLE_STYLES[i].width} strokeLinecap="round" fill="none" />
+      ))}
+      {/* Шишка */}
+      <g transform="rotate(-25 66 18)">
+        <ellipse cx="66" cy="18" rx="5" ry="8" fill="#78350f" />
+        <path d="M61.5 14q4.5 2 9 0M61 18q5 2 10 0M61.5 22q4.5 2 9 0" stroke="#b45309" strokeWidth="1" fill="none" />
+      </g>
+      {/* Красные шары с бликом и золотым колпачком */}
+      {[[40, 34, 9], [140, 22, 8], [112, 42, 6]].map(([cx, cy, r]) => (
+        <g key={`${cx}`}>
+          <rect x={cx - 2} y={cy - r - 2.5} width="4" height="3" rx="0.8" fill="url(#garland-gold)" />
+          <circle cx={cx} cy={cy} r={r} fill="url(#garland-ball)" />
+          <ellipse cx={cx - r * 0.35} cy={cy - r * 0.4} rx={r * 0.28} ry={r * 0.18} fill="#fff" opacity="0.75" transform={`rotate(-30 ${cx - r * 0.35} ${cy - r * 0.4})`} />
+        </g>
+      ))}
+      {/* Золотая звезда */}
+      <path d={starPath(95, 30, 8.5)} fill="url(#garland-gold)" stroke="#a16207" strokeWidth="0.6" />
+      <path d={starPath(17, 40, 5.5)} fill="url(#garland-gold)" stroke="#a16207" strokeWidth="0.5" />
+      {/* Снежинка */}
+      <g stroke="#fff" strokeWidth="1.7" strokeLinecap="round" filter="url(#garland-shadow)">
+        {[0, 60, 120].map(a => (
+          <g key={a} transform={`rotate(${a} 176 25)`}>
+            <path d="M176 17v16M173.5 19.5l2.5 2.5 2.5-2.5M173.5 30.5l2.5-2.5 2.5 2.5" fill="none" />
+          </g>
+        ))}
+      </g>
+      {/* Мерцающие золотые блики */}
+      {GARLAND_GLINTS.map(([x, y, s], i) => (
+        <path key={i} d={glintPath(x, y, s)} className="garland-glint" style={{ animationDelay: `${((index * 3 + i * 5) % 12) * 0.25}s` }} />
+      ))}
+    </svg>
+  );
+}
+
+function NewYearGarland() {
+  return (
+    <div className="new-year-garland mx-6" aria-hidden="true">
+      {/* Общие градиенты и тень для всех фрагментов */}
+      <svg width="0" height="0" className="absolute">
+        <defs>
+          <radialGradient id="garland-ball" cx="35%" cy="30%" r="75%">
+            <stop offset="0%" stopColor="#fca5a5" />
+            <stop offset="35%" stopColor="#dc2626" />
+            <stop offset="100%" stopColor="#7f1d1d" />
+          </radialGradient>
+          <linearGradient id="garland-gold" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stopColor="#fef08a" />
+            <stop offset="50%" stopColor="#eab308" />
+            <stop offset="100%" stopColor="#a16207" />
+          </linearGradient>
+          <filter id="garland-shadow" x="-50%" y="-50%" width="200%" height="200%">
+            <feDropShadow dx="0" dy="0.6" stdDeviation="0.6" floodColor="#0f172a" floodOpacity="0.5" />
+          </filter>
+        </defs>
+      </svg>
+      {Array.from({ length: 12 }, (_, i) => <GarlandTile key={i} index={i} />)}
+    </div>
+  );
+}
+
+function SettingsPage({ data, decor, onDecorChange }: {
+  data: ReturnType<typeof useData>;
+  decor: DecorSettings;
+  onDecorChange: (next: DecorSettings) => void;
+}) {
   const config = gs.getCurrentConfig();
 
   const handleDisconnect = () => {
@@ -380,6 +508,29 @@ function SettingsPage({ data }: { data: ReturnType<typeof useData> }) {
         </div>
       </div>
 
+      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+        <div className="p-5 border-b border-slate-200 bg-slate-50">
+          <h3 className="text-lg font-bold text-slate-800">🎄 Декорирование приложения</h3>
+        </div>
+        <div className="p-5 space-y-3">
+          <label className="flex items-center justify-between gap-4 cursor-pointer">
+            <div>
+              <div className="text-sm font-medium text-slate-800">Новогодняя гирлянда</div>
+              <div className="text-xs text-slate-500">Хвойная гирлянда с шарами и золотыми бликами в шапке приложения</div>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={decor.garland}
+              onClick={() => onDecorChange({ ...decor, garland: !decor.garland })}
+              className={`relative w-11 h-6 rounded-full transition-colors shrink-0 ${decor.garland ? 'bg-emerald-500' : 'bg-slate-300'}`}
+            >
+              <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${decor.garland ? 'translate-x-5' : ''}`} />
+            </button>
+          </label>
+          <p className="text-xs text-slate-400">Настройка сохраняется на этом компьютере.</p>
+        </div>
+      </div>
 
 
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
@@ -4971,6 +5122,9 @@ export default function App() {
     setCurrentPage('chat');
   };
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  // Декорирование приложения (гирлянда и т.п.) — настройка этого компьютера, хранится в браузере
+  const [decor, setDecor] = useState<DecorSettings>(loadDecor);
+  const updateDecor = (next: DecorSettings) => { setDecor(next); saveDecor(next); };
   const data = useData();
 
   if (!isConfigured) return <SetupPage />;
@@ -5015,7 +5169,7 @@ export default function App() {
       case 'chat': return <ChatPage data={data} focusEmployeeId={focusChatEmployeeId} onFocusHandled={() => setFocusChatEmployeeId(null)} />;
       case 'reports': return <ReportsPage data={data} />;
       case 'audit': return <AuditPage data={data} />;
-      case 'settings': return <SettingsPage data={data} />;
+      case 'settings': return <SettingsPage data={data} decor={decor} onDecorChange={updateDecor} />;
     }
   };
 
@@ -5086,11 +5240,8 @@ export default function App() {
               {menuItems.find(m => m.id === currentPage)?.label}
             </h2>
           </div>
-          {/* Новогодняя гирлянда между названием раздела и датой: занимает всё место между ними,
-              лишние лампочки обрезаются по ширине; клики проходят сквозь неё */}
-          <div className="new-year-garland mx-6" aria-hidden="true">
-            {Array.from({ length: 80 }, (_, i) => <span key={i} className="garland-bulb" />)}
-          </div>
+          {/* Новогодняя гирлянда между названием раздела и датой (включается в «Настройки → Декорирование приложения») */}
+          {decor.garland && <NewYearGarland />}
           <div className="flex items-center gap-3">
             <div className="text-sm text-slate-500 hidden md:block">
               {new Date().toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric', month: 'short' })}
