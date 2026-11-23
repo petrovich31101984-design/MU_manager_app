@@ -60,7 +60,6 @@ function useData() {
   const [auditLog, setAuditLog] = useState<gs.AuditEntry[]>([]);
   // Декорирование (общее для всех приложений, хранится служебной записью на листе «Объявления»)
   const [decor, setDecor] = useState<gs.DecorSettings>({ garland: false, snow: false });
-  const [decorRecordExists, setDecorRecordExists] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -77,7 +76,6 @@ function useData() {
       // Служебную запись декора в списки объявлений не пускаем
       setAnnouncements(anns.filter(a => !gs.isDecorRecord(a)));
       setDecor(gs.readDecor(anns));
-      setDecorRecordExists(anns.some(gs.isDecorRecord));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Ошибка загрузки');
     } finally { setLoading(false); }
@@ -152,14 +150,13 @@ function useData() {
     const previous = decor;
     setDecor(next);
     try {
-      await gs.saveDecor(next, decorRecordExists);
-      setDecorRecordExists(true);
+      await gs.saveDecor(next);
     } catch (err) {
       console.error('Ошибка сохранения настроек декора:', err);
       setDecor(previous);
       alert(`Не удалось сохранить настройку декорирования. Попробуйте ещё раз.\n\nПричина: ${err instanceof Error ? err.message : String(err)}`);
     }
-  }, [decor, decorRecordExists]);
+  }, [decor]);
 
   return {
     employees, setEmployees, nomenclature, setNomenclature,

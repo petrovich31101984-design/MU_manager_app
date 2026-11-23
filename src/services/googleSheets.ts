@@ -504,8 +504,13 @@ export async function createAnnouncement(announcement: { id: string; title: stri
 export const DECOR_RECORD_ID = 'smu-decor';
 export type DecorSettings = { garland: boolean; snow: boolean };
 export const isDecorRecord = (a: { id?: unknown }) => String(a.id ?? '').trim() === DECOR_RECORD_ID;
+const decorTime = (a: Announcement) => {
+  const t = new Date(a.date).getTime();
+  return Number.isNaN(t) ? 0 : t;
+};
+// Если служебных записей вдруг несколько (раньше могли появиться дубли) — действует самая свежая по «Дате»
 export function readDecor(announcements: Announcement[]): DecorSettings {
-  const record = announcements.find(isDecorRecord);
+  const record = announcements.filter(isDecorRecord).sort((a, b) => decorTime(b) - decorTime(a))[0];
   try {
     const value = JSON.parse(record?.text || '{}');
     return { garland: value.garland === true, snow: value.snow === true };
@@ -513,11 +518,18 @@ export function readDecor(announcements: Announcement[]): DecorSettings {
     return { garland: false, snow: false };
   }
 }
-/** Сохранить настройки декора; recordExists — есть ли уже служебная запись в таблице */
-export async function saveDecor(decor: DecorSettings, recordExists: boolean): Promise<void> {
+/**
+ * Сохранить настройки декора. Есть ли уже служебная запись, проверяем по свежим данным таблицы,
+ * а не по тому, что было при открытии приложения: иначе (запись создали в другой вкладке или на другом
+ * компьютере) добавлялась вторая запись, а все приложения продолжали читать первую — и выключить декор
+ * не получалось. «Дата» обновляется при каждом сохранении: по ней выбирается действующая запись.
+ */
+export async function saveDecor(decor: DecorSettings): Promise<void> {
   const text = JSON.stringify(decor);
+  const recordExists = (await getAnnouncements()).some(isDecorRecord);
   if (recordExists) {
-    await postData('updateAnnouncement', { 'ID': DECOR_RECORD_ID, 'Текст': text, 'Активно': 'НЕТ' });
+    // Скрипт обновляет первую строку с этим ID — она же после обновления становится самой свежей
+    await postData('updateAnnouncement', { 'ID': DECOR_RECORD_ID, 'Текст': text, 'Активно': 'НЕТ', 'Дата': new Date().toISOString() });
   } else {
     await postData('createAnnouncement', {
       'ID': DECOR_RECORD_ID,
