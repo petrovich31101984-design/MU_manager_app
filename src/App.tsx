@@ -2580,6 +2580,8 @@ function BalancePage({ data }: { data: ReturnType<typeof useData> }) {
   const { nomenclature } = data;
 
   const { balanceEmployees, calculateBalance } = createBalanceCalculator(data);
+  // Сотрудник, чьи остатки открыты в модальном окне
+  const [selectedEmployee, setSelectedEmployee] = useState<gs.Employee | null>(null);
   // Колонки сотрудников — по персональному номеру, как в Google-таблице; без номера — в конце
   const allEmployees = [...balanceEmployees].sort((a, b) => {
     const aNumber = String(a.personalNumber ?? '').trim();
@@ -2658,7 +2660,8 @@ function BalancePage({ data }: { data: ReturnType<typeof useData> }) {
                     // ФИО мелким шрифтом, в одну строку, по центру и по середине, на голубом фоне.
                     // Рамка — через inset box-shadow: обычная граница у закреплённой шапки
                     // при border-collapse пропадает во время прокрутки
-                    <th key={emp.id} title={emp.fullName} className="px-2 py-2 text-center align-middle text-xs font-semibold text-slate-800 border border-slate-300 bg-sky-200 whitespace-nowrap" style={{ minWidth: '130px', boxShadow: 'inset 0 0 0 1px #94a3b8' }}>
+                    // Клик по ФИО — окно со всеми остатками сотрудника (с печатью)
+                    <th key={emp.id} title={`${emp.fullName} — нажмите, чтобы открыть остатки`} onClick={() => setSelectedEmployee(emp)} className="px-2 py-2 text-center align-middle text-xs font-semibold text-slate-800 border border-slate-300 bg-sky-200 hover:bg-sky-300 cursor-pointer whitespace-nowrap select-none" style={{ minWidth: '130px', boxShadow: 'inset 0 0 0 1px #94a3b8' }}>
                       {formattedName}
                     </th>
                   );
@@ -2741,6 +2744,151 @@ function BalancePage({ data }: { data: ReturnType<typeof useData> }) {
               )}
             </tbody>
           </table>
+        </div>
+      </div>
+
+      {selectedEmployee && (
+        <EmployeeBalanceModal
+          employee={selectedEmployee}
+          groups={balanceGroups.map(g => ({
+            label: g.label,
+            style: g.style,
+            rows: g.items
+              .map(item => ({ item, quantity: calculateBalance(selectedEmployee.id, item.id) }))
+              .filter(r => r.quantity !== 0),
+          }))}
+          onClose={() => setSelectedEmployee(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+// ============ ОСТАТКИ ОДНОГО СОТРУДНИКА (модальное окно с печатью) ============
+// Открывается кликом по ФИО в «Остаток у сотрудника». Показывает позиции с ненулевым остатком
+// группами (ЛС ПКУ, ЛС, расходные материалы, оборудование) и печатает их таблицей.
+type EmployeeBalanceGroup = { label: string; style: string; rows: Array<{ item: gs.Nomenclature; quantity: number }> };
+
+const escapeHtml = (value: unknown) =>
+  String(value ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch] as string));
+
+function EmployeeBalanceModal({ employee, groups, onClose }: {
+  employee: gs.Employee;
+  groups: EmployeeBalanceGroup[];
+  onClose: () => void;
+}) {
+  const filledGroups = groups.filter(g => g.rows.length > 0);
+  const positionsCount = filledGroups.reduce((sum, g) => sum + g.rows.length, 0);
+  const today = new Date().toLocaleDateString('ru-RU');
+  const personalNumber = String(employee.personalNumber ?? '').trim();
+
+  // Закрытие по Esc
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  // Печать: отдельный документ с таблицей в скрытом iframe — без меню, кнопок и шапки приложения
+  const handlePrint = () => {
+    let n = 0;
+    const body = filledGroups.map(g =>
+      `<tr class="group"><td colspan="4">${escapeHtml(g.label)}</td></tr>` +
+      g.rows.map(r =>
+        `<tr><td class="num">${++n}</td><td>${escapeHtml(r.item.name)}</td><td>${escapeHtml(r.item.unit)}</td><td class="qty">${r.quantity}</td></tr>`
+      ).join('')
+    ).join('');
+    const html = `<!doctype html><html lang="ru"><head><meta charset="utf-8">
+<title>Остатки — ${escapeHtml(employee.fullName)}</title>
+<style>
+  @page { size: A4; margin: 15mm; }
+  body { font-family: Arial, sans-serif; font-size: 12px; color: #000; }
+  h1 { font-size: 16px; margin: 0 0 4px; }
+  .meta { margin-bottom: 12px; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { border: 1px solid #000; padding: 4px 6px; text-align: left; }
+  th { background: #e5e7eb; }
+  tr.group td { background: #f3f4f6; font-weight: bold; text-transform: uppercase; }
+  td.num { width: 32px; text-align: center; }
+  td.qty, th.qty { width: 80px; text-align: right; }
+  tr { page-break-inside: avoid; }
+  .sign { margin-top: 32px; display: flex; justify-content: space-between; }
+  * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+</style></head><body>
+<h1>Остатки у сотрудника</h1>
+<div class="meta">Сотрудник: <b>${escapeHtml(employee.fullName)}</b>${personalNumber ? ` (№ ${escapeHtml(personalNumber)})` : ''}<br>Дата: ${today}<br>Позиций: ${positionsCount}</div>
+${positionsCount === 0 ? '<p>Остатков нет.</p>' : `<table><thead><tr><th>№</th><th>Номенклатура</th><th>Ед. изм.</th><th class="qty">Кол-во</th></tr></thead><tbody>${body}</tbody></table>`}
+<div class="sign"><span>Сотрудник: ____________________</span><span>Руководитель: ____________________</span></div>
+</body></html>`;
+
+    const frame = document.createElement('iframe');
+    frame.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;';
+    document.body.appendChild(frame);
+    const doc = frame.contentDocument;
+    const win = frame.contentWindow;
+    if (!doc || !win) { frame.remove(); return; }
+    doc.open();
+    doc.write(html);
+    doc.close();
+    // Убираем iframe после закрытия диалога печати
+    win.onafterprint = () => setTimeout(() => frame.remove(), 0);
+    setTimeout(() => { win.focus(); win.print(); }, 100);
+  };
+
+  let rowNumber = 0;
+  return (
+    <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl border border-slate-200 w-full max-w-2xl max-h-[90vh] flex flex-col shadow-2xl" onClick={e => e.stopPropagation()}>
+        <div className="p-6 border-b border-slate-200 flex items-start justify-between gap-4">
+          <div>
+            <h3 className="text-lg font-bold text-slate-800">🧰 Остатки сотрудника</h3>
+            <p className="text-sm text-slate-600 mt-1">
+              {employee.fullName}{personalNumber && <span className="text-slate-400"> · № {personalNumber}</span>}
+            </p>
+            <p className="text-xs text-slate-400 mt-0.5">на {today} · позиций: {positionsCount}</p>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-2xl leading-none">×</button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-6">
+          {positionsCount === 0 ? (
+            <div className="text-center text-slate-400 py-8">У сотрудника нет остатков</div>
+          ) : (
+            <table className="w-full border-collapse text-sm">
+              <thead>
+                <tr className="bg-slate-100">
+                  <th className="px-3 py-2 text-center font-semibold text-slate-700 border border-slate-300 w-12">№</th>
+                  <th className="px-3 py-2 text-left font-semibold text-slate-700 border border-slate-300">Номенклатура</th>
+                  <th className="px-3 py-2 text-left font-semibold text-slate-700 border border-slate-300 w-24">Ед. изм.</th>
+                  <th className="px-3 py-2 text-right font-semibold text-slate-700 border border-slate-300 w-24">Кол-во</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filledGroups.map(g => (
+                  <Fragment key={g.label}>
+                    <tr>
+                      <td colSpan={4} className={`px-3 py-1.5 text-xs font-bold uppercase tracking-wide border border-slate-300 ${g.style}`}>
+                        {g.label} <span className="font-medium normal-case opacity-70">({g.rows.length})</span>
+                      </td>
+                    </tr>
+                    {g.rows.map(r => (
+                      <tr key={r.item.id} className="hover:bg-blue-50">
+                        <td className="px-3 py-1.5 text-center text-slate-500 border border-slate-300">{++rowNumber}</td>
+                        <td className="px-3 py-1.5 text-slate-800 border border-slate-300">{r.item.name}</td>
+                        <td className="px-3 py-1.5 text-slate-600 border border-slate-300">{r.item.unit}</td>
+                        <td className={`px-3 py-1.5 text-right font-semibold border border-slate-300 ${r.quantity < 0 ? 'text-red-600' : 'text-slate-800'}`}>{r.quantity}</td>
+                      </tr>
+                    ))}
+                  </Fragment>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        <div className="p-4 border-t border-slate-200 flex justify-end gap-2">
+          <button onClick={onClose} className="px-4 py-2 bg-white text-slate-700 rounded-lg text-sm hover:bg-slate-100 border border-slate-300">Закрыть</button>
+          <button onClick={handlePrint} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">🖨️ Печать</button>
         </div>
       </div>
     </div>
