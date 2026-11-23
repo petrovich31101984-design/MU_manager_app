@@ -2808,6 +2808,13 @@ function BalancePage({ data }: { data: ReturnType<typeof useData> }) {
   const { balanceEmployees, calculateBalance } = createBalanceCalculator(data);
   // Сотрудник, чьи остатки открыты в модальном окне
   const [selectedEmployee, setSelectedEmployee] = useState<gs.Employee | null>(null);
+  // Свёрнутые группы номенклатуры (клик по заголовку группы сворачивает/разворачивает её)
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => new Set());
+  const toggleGroup = (category: string) => setCollapsedGroups(prev => {
+    const next = new Set(prev);
+    if (next.has(category)) next.delete(category); else next.add(category);
+    return next;
+  });
   // Колонки сотрудников — по персональному номеру, как в Google-таблице; без номера — в конце
   const allEmployees = [...balanceEmployees].sort((a, b) => {
     const aNumber = String(a.personalNumber ?? '').trim();
@@ -2911,13 +2918,13 @@ function BalancePage({ data }: { data: ReturnType<typeof useData> }) {
                   {balanceGroups.map(group => (
                   <Fragment key={group.category}>
                   {/* Заголовок группы: ЛС ПКУ → ЛС → Расходные материалы → Оборудование */}
-                  <tr>
+                  <tr onClick={() => toggleGroup(group.category)} className="cursor-pointer select-none" title={collapsedGroups.has(group.category) ? 'Развернуть группу' : 'Свернуть группу'}>
                     <td colSpan={3} className={`px-3 py-1.5 text-xs font-bold uppercase tracking-wide border border-slate-300 sticky left-0 z-10 ${group.style}`} style={{ boxShadow: '2px 0 4px -1px rgba(0,0,0,0.2)' }}>
-                      {group.label} <span className="font-medium normal-case opacity-70">({group.items.length})</span>
+                      <span className="inline-block w-4">{collapsedGroups.has(group.category) ? '▸' : '▾'}</span>{group.label} <span className="font-medium normal-case opacity-70">({group.items.length})</span>
                     </td>
                     <td colSpan={allEmployees.length + 2} className={`border border-slate-300 ${group.style}`}></td>
                   </tr>
-                  {group.items.map((item) => {
+                  {!collapsedGroups.has(group.category) && group.items.map((item) => {
                     const totalQty = calculateTotalQuantity(item.id);
                     const totalSum = totalQty * item.currentPrice;
                     // ЛС ПКУ подсвечиваем оранжевым
