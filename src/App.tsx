@@ -554,6 +554,9 @@ function SettingsPage({ data, decor, onDecorChange }: {
   };
 
   return (
+    // Подпись © прижата к самому низу экрана: страница занимает всю высоту
+    // (минус шапка 64px и отступы main 48px), подпись — после всех блоков, через mt-auto
+    <div className="flex flex-col" style={{ minHeight: 'calc(100vh - 112px)' }}>
     <div className="space-y-6">
       <div>
         <h2 className="text-2xl font-bold text-slate-800">Настройки</h2>
@@ -631,7 +634,8 @@ function SettingsPage({ data, decor, onDecorChange }: {
           </div>
         </div>
       </div>
-      <p className="text-center text-xs text-slate-400">© {new Date().getFullYear()} СМУ • Выездная медицинская помощь • Петрович Е.В.</p>
+    </div>
+      <p className="text-center text-xs text-slate-400 mt-auto pt-6">© {new Date().getFullYear()} СМУ • Выездная медицинская помощь • Петрович Е.В.</p>
     </div>
   );
 }
