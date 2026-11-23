@@ -2579,7 +2579,16 @@ function ReturnsPage({ data }: { data: ReturnType<typeof useData> }) {
 function BalancePage({ data }: { data: ReturnType<typeof useData> }) {
   const { nomenclature } = data;
 
-  const { balanceEmployees: allEmployees, calculateBalance } = createBalanceCalculator(data);
+  const { balanceEmployees, calculateBalance } = createBalanceCalculator(data);
+  // Колонки сотрудников — по персональному номеру, как в Google-таблице; без номера — в конце
+  const allEmployees = [...balanceEmployees].sort((a, b) => {
+    const aNumber = String(a.personalNumber ?? '').trim();
+    const bNumber = String(b.personalNumber ?? '').trim();
+    if (!aNumber && !bNumber) return 0;
+    if (!aNumber) return 1;
+    if (!bNumber) return -1;
+    return aNumber.localeCompare(bNumber, 'ru', { numeric: true });
+  });
 
   // Функция для расчёта общего количества по номенклатуре
   const calculateTotalQuantity = (nomenclatureId: string): number => {
@@ -2632,7 +2641,10 @@ function BalancePage({ data }: { data: ReturnType<typeof useData> }) {
                   const initials = parts.slice(1).map((p: string) => p[0] + '.').join('');
                   const formattedName = initials ? `${lastName} ${initials}` : lastName;
                   return (
-                    <th key={emp.id} className="px-3 py-2 text-left text-sm font-semibold text-slate-700 border border-slate-300 bg-slate-100" style={{ minWidth: '130px' }}>
+                    // ФИО мелким шрифтом, в одну строку, по центру и по середине, на голубом фоне.
+                    // Рамка — через inset box-shadow: обычная граница у закреплённой шапки
+                    // при border-collapse пропадает во время прокрутки
+                    <th key={emp.id} title={emp.fullName} className="px-2 py-2 text-center align-middle text-xs font-semibold text-slate-800 border border-slate-300 bg-sky-200 whitespace-nowrap" style={{ minWidth: '130px', boxShadow: 'inset 0 0 0 1px #94a3b8' }}>
                       {formattedName}
                     </th>
                   );
@@ -2653,24 +2665,28 @@ function BalancePage({ data }: { data: ReturnType<typeof useData> }) {
                   {nomenclature.map((item) => {
                     const totalQty = calculateTotalQuantity(item.id);
                     const totalSum = totalQty * item.currentPrice;
+                    // ЛС ПКУ подсвечиваем оранжевым
+                    const isPku = item.category === 'ЛС ПКУ';
+                    const cellBg = isPku ? 'bg-orange-100' : 'bg-white';
+                    const totalBg = isPku ? 'bg-orange-200' : 'bg-slate-50';
 
                     return (
-                      <tr key={item.id} className="group bg-white hover:bg-blue-50 transition-colors">
-                        <td className="px-3 py-2 text-sm text-slate-800 border border-slate-300 sticky left-0 bg-white group-hover:bg-blue-50 z-10" style={{ minWidth: '220px', boxShadow: 'inset -1px 0 0 0 #cbd5e1, 2px 0 4px -1px rgba(0,0,0,0.2)' }}>{item.name}</td>
-                        <td className="px-3 py-2 text-sm text-slate-700 border border-slate-300 sticky left-[220px] bg-white group-hover:bg-blue-50 z-11" style={{ minWidth: '100px', boxShadow: 'inset -1px 0 0 0 #cbd5e1, inset 1px 0 0 0 #cbd5e1, 2px 0 4px -1px rgba(0,0,0,0.2)' }}>{item.unit}</td>
-                        <td className="px-3 py-2 text-sm text-left text-slate-700 border border-slate-300 sticky left-[320px] bg-white group-hover:bg-blue-50 z-12" style={{ minWidth: '110px', boxShadow: 'inset -1px 0 0 0 #cbd5e1, inset 1px 0 0 0 #cbd5e1, 2px 0 4px -1px rgba(0,0,0,0.2)' }}>{item.currentPrice.toLocaleString('ru-RU')} ₽</td>
+                      <tr key={item.id} className={`group ${cellBg} hover:bg-blue-50 transition-colors`}>
+                        <td className={`px-3 py-2 text-sm border border-slate-300 sticky left-0 ${cellBg} group-hover:bg-blue-50 z-10 ${isPku ? 'text-orange-700 font-semibold' : 'text-slate-800'}`} style={{ minWidth: '220px', boxShadow: 'inset -1px 0 0 0 #cbd5e1, 2px 0 4px -1px rgba(0,0,0,0.2)' }}>{item.name}</td>
+                        <td className={`px-3 py-2 text-sm text-slate-700 border border-slate-300 sticky left-[220px] ${cellBg} group-hover:bg-blue-50 z-11`} style={{ minWidth: '100px', boxShadow: 'inset -1px 0 0 0 #cbd5e1, inset 1px 0 0 0 #cbd5e1, 2px 0 4px -1px rgba(0,0,0,0.2)' }}>{item.unit}</td>
+                        <td className={`px-3 py-2 text-sm text-left text-slate-700 border border-slate-300 sticky left-[320px] ${cellBg} group-hover:bg-blue-50 z-12`} style={{ minWidth: '110px', boxShadow: 'inset -1px 0 0 0 #cbd5e1, inset 1px 0 0 0 #cbd5e1, 2px 0 4px -1px rgba(0,0,0,0.2)' }}>{item.currentPrice.toLocaleString('ru-RU')} ₽</td>
                         {allEmployees.map((emp: gs.Employee) => {
                           const balance = calculateBalance(emp.id, item.id);
                           return (
-                            <td key={emp.id} className={`px-3 py-2 text-sm text-left border border-slate-300 group-hover:bg-blue-50 ${balance > 0 ? 'text-slate-800 font-medium bg-white' : balance < 0 ? 'text-red-600 font-medium bg-white' : 'text-slate-400 bg-white'}`} style={{ minWidth: '130px' }}>
+                            <td key={emp.id} className={`px-3 py-2 text-sm text-left border border-slate-300 ${cellBg} group-hover:bg-blue-50 ${balance > 0 ? 'text-slate-800 font-medium' : balance < 0 ? 'text-red-600 font-medium' : 'text-slate-400'}`} style={{ minWidth: '130px' }}>
                               {balance}
                             </td>
                           );
                         })}
-                        <td className={`px-3 py-2 text-sm text-left font-semibold border border-slate-300 bg-slate-50 group-hover:bg-blue-100 sticky right-[130px] z-11 ${totalQty > 0 ? 'text-slate-800' : totalQty < 0 ? 'text-red-600' : 'text-slate-400'}`} style={{ minWidth: '110px', boxShadow: 'inset 1px 0 0 0 #cbd5e1, inset -1px 0 0 0 #cbd5e1, -2px 0 4px -1px rgba(0,0,0,0.2)' }}>
+                        <td className={`px-3 py-2 text-sm text-left font-semibold border border-slate-300 ${totalBg} group-hover:bg-blue-100 sticky right-[130px] z-11 ${totalQty > 0 ? 'text-slate-800' : totalQty < 0 ? 'text-red-600' : 'text-slate-400'}`} style={{ minWidth: '110px', boxShadow: 'inset 1px 0 0 0 #cbd5e1, inset -1px 0 0 0 #cbd5e1, -2px 0 4px -1px rgba(0,0,0,0.2)' }}>
                           {totalQty}
                         </td>
-                        <td className={`px-3 py-2 text-sm text-left font-semibold border border-slate-300 bg-slate-50 group-hover:bg-blue-100 sticky right-0 z-12 ${totalSum > 0 ? 'text-emerald-600' : totalSum < 0 ? 'text-red-600' : 'text-slate-400'}`} style={{ minWidth: '130px', boxShadow: 'inset 1px 0 0 0 #cbd5e1, -2px 0 4px -1px rgba(0,0,0,0.2)' }}>
+                        <td className={`px-3 py-2 text-sm text-left font-semibold border border-slate-300 ${totalBg} group-hover:bg-blue-100 sticky right-0 z-12 ${totalSum > 0 ? 'text-emerald-600' : totalSum < 0 ? 'text-red-600' : 'text-slate-400'}`} style={{ minWidth: '130px', boxShadow: 'inset 1px 0 0 0 #cbd5e1, -2px 0 4px -1px rgba(0,0,0,0.2)' }}>
                           {totalSum.toLocaleString('ru-RU')} ₽
                         </td>
                       </tr>
@@ -4835,7 +4851,12 @@ export default function App() {
           <img src={LOGO_URL} alt="СМУ" className="w-10 h-10 rounded-lg object-contain shrink-0" />
           {sidebarOpen && (
             <div className="overflow-hidden">
-              <h1 className="text-sm font-bold whitespace-nowrap tracking-wide"><span className="text-[#0202FA]">С</span><span className="text-[#FA0202]">М</span><span className="text-[#0202FA]">У</span></h1>
+              <h1 className="text-sm font-bold whitespace-nowrap tracking-wide flex items-center"><span className="smu-letter text-[#0202FA]">С</span><span className="smu-letter text-[#FA0202]">М</span><span className="smu-letter text-[#0202FA]">У</span>
+                {/* Линия кардиомонитора: выходит из «СМУ» и тянется до конца подписи «Система медицинского учёта (р) (v.…)» */}
+                <svg className="smu-ecg flex-1 min-w-0 ml-1" viewBox="0 0 180 20" height="16" preserveAspectRatio="none" aria-hidden="true">
+                  <polyline pathLength={100} points="0,10 14,10 18,7 22,10 28,10 31,12 35,1 39,19 42,10 50,10 55,6 60,10 74,10 78,7 82,10 88,10 91,12 95,1 99,19 102,10 110,10 115,6 120,10 134,10 138,7 142,10 148,10 151,12 155,1 159,19 162,10 170,10 175,6 180,10" />
+                </svg>
+              </h1>
               <p className="text-xs text-slate-500 leading-tight">Система медицинского учёта (р) <span className="text-green-600 font-semibold">(v.{APP_VERSION})</span></p>
             </div>
           )}
@@ -4878,7 +4899,8 @@ export default function App() {
       </aside>
 
       {/* Main */}
-      <div className={`flex-1 ${sidebarOpen ? 'ml-80' : 'ml-20'} transition-all duration-300 max-w-full`}>
+      {/* min-w-0: широкие таблицы (остатки) не растягивают колонку — прокручиваются внутри себя, без прокрутки всей страницы */}
+      <div className={`flex-1 min-w-0 ${sidebarOpen ? 'ml-80' : 'ml-20'} transition-all duration-300`}>
         <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-6 sticky top-0 z-30 shadow-sm">
           <div className="flex items-center gap-4">
             <button onClick={() => setSidebarOpen(!sidebarOpen)} className="p-2 rounded-lg hover:bg-slate-100 text-slate-600">
