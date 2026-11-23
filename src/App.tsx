@@ -2601,9 +2601,12 @@ function BalancePage({ data }: { data: ReturnType<typeof useData> }) {
     { category: 'Оборудование', label: 'Оборудование', style: 'bg-purple-100 text-purple-800' },
   ];
   const knownCategories = new Set(categoryGroups.map(g => g.category));
+  // Внутри группы — по алфавиту
+  const byName = (a: gs.Nomenclature, b: gs.Nomenclature) =>
+    String(a.name ?? '').trim().localeCompare(String(b.name ?? '').trim(), 'ru', { sensitivity: 'base', numeric: true });
   const balanceGroups = [
-    ...categoryGroups.map(g => ({ ...g, items: nomenclature.filter(n => n.category === g.category) })),
-    { category: '__other', label: 'Прочее', style: 'bg-slate-100 text-slate-700', items: nomenclature.filter(n => !knownCategories.has(n.category)) },
+    ...categoryGroups.map(g => ({ ...g, items: nomenclature.filter(n => n.category === g.category).sort(byName) })),
+    { category: '__other', label: 'Прочее', style: 'bg-slate-100 text-slate-700', items: nomenclature.filter(n => !knownCategories.has(n.category)).sort(byName) },
   ].filter(g => g.items.length > 0);
 
   // Функция для расчёта общего количества по номенклатуре
