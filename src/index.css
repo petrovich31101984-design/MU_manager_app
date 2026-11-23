@@ -59,8 +59,40 @@
   30% { opacity: 0; transform: scale(0.2) rotate(90deg); }
 }
 
+/* Падающий снег (включается в «Настройки → Декорирование приложения»).
+   z-index 20: над содержимым страницы, но под шапкой (30), меню (40) и модальными окнами (50);
+   pointer-events: none — клики и выделение текста проходят сквозь снег */
+.snowfall {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 20;
+}
+.snowflake {
+  position: absolute;
+  top: -24px;
+  animation-name: snow-fall;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+  will-change: transform;
+}
+.snowflake-sway {
+  display: block;
+  animation: snow-sway ease-in-out infinite alternate;
+}
+@keyframes snow-fall {
+  from { transform: translateY(0) rotate(0deg); }
+  to { transform: translateY(calc(100vh + 48px)) rotate(180deg); }
+}
+@keyframes snow-sway {
+  from { transform: translateX(calc(var(--sway) / -2)); }
+  to { transform: translateX(calc(var(--sway) / 2)); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .smu-letter { animation: none; }
   .smu-ecg polyline { animation: none; stroke-dashoffset: 0; }
   .garland-glint { animation: none; opacity: 0.9; }
+  .snowfall { display: none; } /* без анимации снег не нужен */
 }

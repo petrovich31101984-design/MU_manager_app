@@ -348,14 +348,14 @@ function AuditPage({ data }: { data: ReturnType<typeof useData> }) {
 // ============ НАСТРОЙКИ ============
 // ============ ДЕКОРИРОВАНИЕ ПРИЛОЖЕНИЯ ============
 // Настройки оформления хранятся в браузере этого компьютера (localStorage), в таблицу не пишутся.
-type DecorSettings = { garland: boolean };
+type DecorSettings = { garland: boolean; snow: boolean };
 const DECOR_KEY = 'smu-pc-decor';
 const loadDecor = (): DecorSettings => {
   try {
     const saved = JSON.parse(localStorage.getItem(DECOR_KEY) || '{}');
-    return { garland: saved.garland === true };
+    return { garland: saved.garland === true, snow: saved.snow === true };
   } catch {
-    return { garland: false };
+    return { garland: false, snow: false };
   }
 };
 const saveDecor = (value: DecorSettings) => {
@@ -470,6 +470,56 @@ function NewYearGarland() {
   );
 }
 
+// Падающий снег: редкие мелкие голубоватые полупрозрачные снежинки медленно опускаются сверху вниз,
+// слегка покачиваясь. Слой не перехватывает клики и лежит ниже шапки, меню и модальных окон,
+// поэтому не мешает работе. Параметры каждой снежинки псевдослучайные, но постоянные.
+const SNOWFLAKES = (() => {
+  let seed = 11;
+  const rand = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  return Array.from({ length: 28 }, () => {
+    const duration = 18 + rand() * 16; // 18–34 с на весь экран — медленно
+    return {
+      left: rand() * 100,                      // % ширины окна
+      size: 8 + rand() * 9,                    // 8–17 px
+      opacity: 0.35 + rand() * 0.3,            // 0.35–0.65
+      duration,
+      delay: -rand() * duration,               // отрицательная задержка: снег сразу по всему экрану
+      sway: 12 + rand() * 22,                  // размах покачивания, px
+      swayDuration: 3 + rand() * 3,
+    };
+  });
+})();
+
+function SnowfallLayer() {
+  return (
+    <div className="snowfall" aria-hidden="true">
+      {SNOWFLAKES.map((f, i) => (
+        <div
+          key={i}
+          className="snowflake"
+          style={{ left: `${f.left}%`, animationDuration: `${f.duration}s`, animationDelay: `${f.delay}s` }}
+        >
+          <svg
+            width={f.size}
+            height={f.size}
+            viewBox="-10 -10 20 20"
+            className="snowflake-sway"
+            style={{ opacity: f.opacity, animationDuration: `${f.swayDuration}s`, ['--sway' as string]: `${f.sway}px` }}
+          >
+            <g stroke="#7dd3fc" strokeWidth="1.6" strokeLinecap="round" fill="none">
+              {[0, 60, 120].map(a => (
+                <g key={a} transform={`rotate(${a})`}>
+                  <path d="M0 -9V9M-2.5 -6.5L0 -4L2.5 -6.5M-2.5 6.5L0 4L2.5 6.5" />
+                </g>
+              ))}
+            </g>
+          </svg>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function SettingsPage({ data, decor, onDecorChange }: {
   data: ReturnType<typeof useData>;
   decor: DecorSettings;
@@ -512,23 +562,28 @@ function SettingsPage({ data, decor, onDecorChange }: {
         <div className="p-5 border-b border-slate-200 bg-slate-50">
           <h3 className="text-lg font-bold text-slate-800">🎄 Декорирование приложения</h3>
         </div>
-        <div className="p-5 space-y-3">
-          <label className="flex items-center justify-between gap-4 cursor-pointer">
-            <div>
-              <div className="text-sm font-medium text-slate-800">Новогодняя гирлянда</div>
-              <div className="text-xs text-slate-500">Хвойная гирлянда с шарами и золотыми бликами в шапке приложения</div>
-            </div>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={decor.garland}
-              onClick={() => onDecorChange({ ...decor, garland: !decor.garland })}
-              className={`relative w-11 h-6 rounded-full transition-colors shrink-0 ${decor.garland ? 'bg-emerald-500' : 'bg-slate-300'}`}
-            >
-              <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${decor.garland ? 'translate-x-5' : ''}`} />
-            </button>
-          </label>
-          <p className="text-xs text-slate-400">Настройка сохраняется на этом компьютере.</p>
+        <div className="p-5 space-y-4">
+          {([
+            { key: 'garland', title: 'Новогодняя гирлянда', hint: 'Хвойная гирлянда с шарами и золотыми бликами в шапке приложения' },
+            { key: 'snow', title: 'Снежинки', hint: 'Голубоватые снежинки медленно падают сверху вниз; не мешают нажимать и читать' },
+          ] as const).map(opt => (
+            <label key={opt.key} className="flex items-center justify-between gap-4 cursor-pointer">
+              <div>
+                <div className="text-sm font-medium text-slate-800">{opt.title}</div>
+                <div className="text-xs text-slate-500">{opt.hint}</div>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={decor[opt.key]}
+                onClick={() => onDecorChange({ ...decor, [opt.key]: !decor[opt.key] })}
+                className={`relative w-11 h-6 rounded-full transition-colors shrink-0 ${decor[opt.key] ? 'bg-emerald-500' : 'bg-slate-300'}`}
+              >
+                <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${decor[opt.key] ? 'translate-x-5' : ''}`} />
+              </button>
+            </label>
+          ))}
+          <p className="text-xs text-slate-400">Настройки сохраняются на этом компьютере.</p>
         </div>
       </div>
 
@@ -5250,6 +5305,8 @@ export default function App() {
         </header>
         <main className="p-6 overflow-hidden max-w-full">{renderPage()}</main>
       </div>
+      {/* Снег поверх содержимого, но под шапкой, меню и окнами (включается в «Настройки → Декорирование приложения») */}
+      {decor.snow && <SnowfallLayer />}
     </div>
   );
 }
