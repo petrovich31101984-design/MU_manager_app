@@ -496,6 +496,41 @@ export async function createAnnouncement(announcement: { id: string; title: stri
   });
 }
 
+// ==================== ДЕКОРИРОВАНИЕ ПРИЛОЖЕНИЙ ====================
+// Настройки декора (гирлянда, снег) хранятся служебной записью на листе «Объявления» с ID DECOR_RECORD_ID:
+// в «Тексте» — JSON {"garland":true,"snow":false}, «Активно» = НЕТ (поэтому как объявление её не показывает
+// ни одна версия приложений). Руководитель её меняет, кладовщик и сотрудники только читают.
+// Так обходимся без изменения Apps Script.
+export const DECOR_RECORD_ID = 'smu-decor';
+export type DecorSettings = { garland: boolean; snow: boolean };
+export const isDecorRecord = (a: { id?: unknown }) => String(a.id ?? '').trim() === DECOR_RECORD_ID;
+export function readDecor(announcements: Announcement[]): DecorSettings {
+  const record = announcements.find(isDecorRecord);
+  try {
+    const value = JSON.parse(record?.text || '{}');
+    return { garland: value.garland === true, snow: value.snow === true };
+  } catch {
+    return { garland: false, snow: false };
+  }
+}
+/** Сохранить настройки декора; recordExists — есть ли уже служебная запись в таблице */
+export async function saveDecor(decor: DecorSettings, recordExists: boolean): Promise<void> {
+  const text = JSON.stringify(decor);
+  if (recordExists) {
+    await postData('updateAnnouncement', { 'ID': DECOR_RECORD_ID, 'Текст': text, 'Активно': 'НЕТ' });
+  } else {
+    await postData('createAnnouncement', {
+      'ID': DECOR_RECORD_ID,
+      'Заголовок': 'Служебная запись: декорирование приложений (не удалять)',
+      'Текст': text,
+      'Получатели': 'служебное',
+      'Кем создано': 'Руководитель',
+      'Дата': new Date().toISOString(),
+      'Активно': 'НЕТ',
+    });
+  }
+}
+
 export async function updateAnnouncement(id: string, updates: Partial<Announcement>): Promise<void> {
   const sheetUpdates: any = { 'ID': id };
   if (updates.title !== undefined) sheetUpdates['Заголовок'] = updates.title;

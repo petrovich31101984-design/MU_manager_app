@@ -58,6 +58,9 @@ function useData() {
   const [chatMessages, setChatMessages] = useState<gs.ChatMessage[]>([]);
   const [announcements, setAnnouncements] = useState<gs.Announcement[]>([]);
   const [auditLog, setAuditLog] = useState<gs.AuditEntry[]>([]);
+  // Декорирование (общее для всех приложений, хранится служебной записью на листе «Объявления»)
+  const [decor, setDecor] = useState<gs.DecorSettings>({ garland: false, snow: false });
+  const [decorRecordExists, setDecorRecordExists] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -70,7 +73,11 @@ function useData() {
         gs.getExpenses(), gs.getExpenseSheets(), gs.getReturns(), gs.getChatMessages(), gs.getAnnouncements(), gs.getAuditLog(),
       ]);
       setEmployees(emps); setNomenclature(noms); setArrivals(arrs); setInitialStocks(stocks);
-      setExpenses(exps); setExpenseSheets(expSheets); setReturns(rets); setChatMessages(current => mergeChatMessages(msgs, current)); setAnnouncements(anns); setAuditLog(logs);
+      setExpenses(exps); setExpenseSheets(expSheets); setReturns(rets); setChatMessages(current => mergeChatMessages(msgs, current)); setAuditLog(logs);
+      // Служебную запись декора в списки объявлений не пускаем
+      setAnnouncements(anns.filter(a => !gs.isDecorRecord(a)));
+      setDecor(gs.readDecor(anns));
+      setDecorRecordExists(anns.some(gs.isDecorRecord));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Ошибка загрузки');
     } finally { setLoading(false); }
@@ -140,11 +147,26 @@ function useData() {
     };
   }, []);
 
+  // Включить/выключить декор для всех приложений: сразу на экране, затем в таблицу; при ошибке — откат
+  const updateDecor = useCallback(async (next: gs.DecorSettings) => {
+    const previous = decor;
+    setDecor(next);
+    try {
+      await gs.saveDecor(next, decorRecordExists);
+      setDecorRecordExists(true);
+    } catch (err) {
+      console.error('Ошибка сохранения настроек декора:', err);
+      setDecor(previous);
+      alert(`Не удалось сохранить настройку декорирования. Попробуйте ещё раз.\n\nПричина: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }, [decor, decorRecordExists]);
+
   return {
     employees, setEmployees, nomenclature, setNomenclature,
     arrivals, setArrivals, initialStocks, setInitialStocks, expenses, setExpenses, expenseSheets, setExpenseSheets,
     returns, setReturns, chatMessages, setChatMessages, announcements, setAnnouncements,
     auditLog, setAuditLog, loading, error, refresh,
+    decor, updateDecor,
   };
 }
 
@@ -347,20 +369,9 @@ function AuditPage({ data }: { data: ReturnType<typeof useData> }) {
 
 // ============ НАСТРОЙКИ ============
 // ============ ДЕКОРИРОВАНИЕ ПРИЛОЖЕНИЯ ============
-// Настройки оформления хранятся в браузере этого компьютера (localStorage), в таблицу не пишутся.
-type DecorSettings = { garland: boolean; snow: boolean };
-const DECOR_KEY = 'smu-pc-decor';
-const loadDecor = (): DecorSettings => {
-  try {
-    const saved = JSON.parse(localStorage.getItem(DECOR_KEY) || '{}');
-    return { garland: saved.garland === true, snow: saved.snow === true };
-  } catch {
-    return { garland: false, snow: false };
-  }
-};
-const saveDecor = (value: DecorSettings) => {
-  try { localStorage.setItem(DECOR_KEY, JSON.stringify(value)); } catch { /* хранилище недоступно — действует до перезагрузки */ }
-};
+// Настройки декора общие для всех приложений: руководитель включает их здесь, они сохраняются
+// в Google-таблицу (служебная запись, см. gs.saveDecor) и появляются у кладовщика и сотрудников.
+type DecorSettings = gs.DecorSettings;
 
 // Хвойная гирлянда: ветки рисуются иглами из псевдослучайных (но всегда одинаковых) штрихов,
 // на них красные шары, золотые звёзды, белые снежинки, шишки и мерцающие золотые блики.
@@ -564,8 +575,8 @@ function SettingsPage({ data, decor, onDecorChange }: {
         </div>
         <div className="p-5 space-y-4">
           {([
-            { key: 'garland', title: 'Новогодняя гирлянда', hint: 'Хвойная гирлянда с шарами и золотыми бликами в шапке приложения' },
-            { key: 'snow', title: 'Снежинки', hint: 'Голубоватые снежинки медленно падают сверху вниз; не мешают нажимать и читать' },
+            { key: 'garland', title: 'Новогодняя гирлянда', hint: 'Хвойная гирлянда с шарами и золотыми бликами: в шапке у руководителя и кладовщика, под объявлениями у сотрудников' },
+            { key: 'snow', title: 'Снежинки', hint: 'Голубоватые снежинки медленно падают сверху вниз (у руководителя и кладовщика); не мешают нажимать и читать' },
           ] as const).map(opt => (
             <label key={opt.key} className="flex items-center justify-between gap-4 cursor-pointer">
               <div>
@@ -583,7 +594,7 @@ function SettingsPage({ data, decor, onDecorChange }: {
               </button>
             </label>
           ))}
-          <p className="text-xs text-slate-400">Настройки сохраняются на этом компьютере.</p>
+          <p className="text-xs text-slate-400">Настройки сохраняются в Google-таблицу и действуют во всех приложениях. У кладовщика и сотрудников появятся после обновления их приложения.</p>
         </div>
       </div>
 
@@ -5177,10 +5188,9 @@ export default function App() {
     setCurrentPage('chat');
   };
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  // Декорирование приложения (гирлянда и т.п.) — настройка этого компьютера, хранится в браузере
-  const [decor, setDecor] = useState<DecorSettings>(loadDecor);
-  const updateDecor = (next: DecorSettings) => { setDecor(next); saveDecor(next); };
   const data = useData();
+  // Декорирование — общее для всех приложений, хранится в Google-таблице
+  const { decor, updateDecor } = data;
 
   if (!isConfigured) return <SetupPage />;
 
@@ -5224,7 +5234,7 @@ export default function App() {
       case 'chat': return <ChatPage data={data} focusEmployeeId={focusChatEmployeeId} onFocusHandled={() => setFocusChatEmployeeId(null)} />;
       case 'reports': return <ReportsPage data={data} />;
       case 'audit': return <AuditPage data={data} />;
-      case 'settings': return <SettingsPage data={data} decor={decor} onDecorChange={updateDecor} />;
+      case 'settings': return <SettingsPage data={data} decor={decor} onDecorChange={next => void updateDecor(next)} />;
     }
   };
 
