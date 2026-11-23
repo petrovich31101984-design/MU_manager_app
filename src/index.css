@@ -30,7 +30,50 @@
   55% { stroke-dashoffset: 0; }
   100% { stroke-dashoffset: -100; }
 }
+/* Новогодняя гирлянда под шапкой: провод провисает дугами по 40px,
+   в нижней точке каждой дуги — лампочка; цвета чередуются, огни «бегут» волной */
+.new-year-garland {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  height: 28px;
+  overflow: hidden;
+  pointer-events: none;
+  display: flex;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='14' viewBox='0 0 40 14'%3E%3Cpath d='M0 1 Q20 21 40 1' fill='none' stroke='%23334155' stroke-width='1.5'/%3E%3C/svg%3E") repeat-x 0 0 / 40px 14px;
+}
+.garland-bulb {
+  position: relative;
+  flex: none;
+  width: 8px;
+  height: 13px;
+  margin: 12px 16px 0; /* 8 + 16 + 16 = 40px — ровно одна дуга провода; цоколь на нижней точке дуги (y≈11) */
+  border-radius: 50% 50% 50% 50% / 40% 40% 60% 60%;
+  background: currentColor;
+  color: #ef4444;
+  opacity: 0.45;
+  animation: garland-glow 1.6s ease-in-out infinite;
+}
+.garland-bulb::before { /* цоколь */
+  content: '';
+  position: absolute;
+  top: -3px;
+  left: 1.5px;
+  width: 5px;
+  height: 4px;
+  border-radius: 1px;
+  background: #475569;
+}
+.garland-bulb:nth-child(4n+2) { color: #facc15; animation-delay: 0.4s; }
+.garland-bulb:nth-child(4n+3) { color: #22c55e; animation-delay: 0.8s; }
+.garland-bulb:nth-child(4n+4) { color: #3b82f6; animation-delay: 1.2s; }
+@keyframes garland-glow {
+  0%, 100% { opacity: 0.45; box-shadow: none; }
+  50% { opacity: 1; box-shadow: 0 0 8px 2px currentColor; }
+}
 @media (prefers-reduced-motion: reduce) {
   .smu-letter { animation: none; }
   .smu-ecg polyline { animation: none; stroke-dashoffset: 0; }
+  .garland-bulb { animation: none; opacity: 1; }
 }

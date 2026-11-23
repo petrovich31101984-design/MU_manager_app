@@ -5091,6 +5091,11 @@ export default function App() {
               {new Date().toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric', month: 'short' })}
             </div>
           </div>
+          {/* Новогодняя гирлянда: провод с мигающими лампочками свисает с нижнего края шапки.
+              Лишние лампочки обрезаются по ширине; клики проходят сквозь неё */}
+          <div className="new-year-garland" aria-hidden="true">
+            {Array.from({ length: 80 }, (_, i) => <span key={i} className="garland-bulb" />)}
+          </div>
         </header>
         <main className="p-6 overflow-hidden max-w-full">{renderPage()}</main>
       </div>
