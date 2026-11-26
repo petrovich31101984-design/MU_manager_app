@@ -600,3 +600,54 @@ export async function getPriceHistory(nomenclatureId: string): Promise<PriceHist
     }))
     .sort((a: PriceHistory, b: PriceHistory) => new Date(b.date).getTime() - new Date(a.date).getTime());
 }
+
+// ==================== ПРАЙС УСЛУГ ====================
+// Лист «Прайс услуг»: стоимость услуг по категориям выезда. По нему таблица считает
+// «Стоимость терапии» в листах расхода сотрудников.
+
+/** Категории выезда в прайсе. «Вызов» — для «Вызов однократно» и «Вызов + повторы». */
+export const SERVICE_CATEGORIES = ['Вызов', 'Курс', 'Госпитализация', 'Мед. отвод', 'Неустойка'] as const;
+
+export interface ServicePrice {
+  id: string; category: string; name: string;
+  /** null — цена ещё не установлена */
+  price: number | null;
+  active: boolean; updatedAt: string; note: string;
+}
+
+export async function getServicePrices(): Promise<ServicePrice[]> {
+  const data = await fetchData('getServicePrices');
+  return (Array.isArray(data) ? data : []).map((row: any) => {
+    const rawPrice = row['Стоимость (₽)'];
+    const price = rawPrice === '' || rawPrice === null || rawPrice === undefined
+      ? null
+      : parseFloat(String(rawPrice).replace(/\s/g, '').replace(',', '.'));
+    return {
+      id: String(row['ID'] ?? ''),
+      category: String(row['Категория выезда'] ?? '').trim(),
+      name: String(row['Название услуги'] ?? '').trim(),
+      price: price === null || Number.isNaN(price) ? null : price,
+      active: String(row['Актуальна'] ?? '').trim().toUpperCase() !== 'НЕТ',
+      updatedAt: String(row['Дата изменения'] ?? ''),
+      note: String(row['Примечание'] ?? ''),
+    };
+  });
+}
+
+export async function addServicePrice(item: ServicePrice): Promise<void> {
+  await postData('addServicePrice', {
+    id: item.id, category: item.category, name: item.name,
+    price: item.price ?? '', active: item.active, note: item.note,
+  });
+}
+
+export async function updateServicePrice(id: string, item: Partial<ServicePrice>): Promise<void> {
+  await postData('updateServicePrice', {
+    id,
+    data: { ...item, price: item.price === null ? '' : item.price },
+  });
+}
+
+export async function deleteServicePrice(id: string): Promise<void> {
+  await postData('deleteServicePrice', { id });
+}

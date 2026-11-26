@@ -167,7 +167,7 @@ function useData() {
   };
 }
 
-type Page = 'dashboard' | 'employees' | 'nomenclature' | 'arrival' | 'expense' | 'balance' | 'returns' | 'archive' | 'chat' | 'reports' | 'audit' | 'settings';
+type Page = 'dashboard' | 'employees' | 'nomenclature' | 'prices' | 'arrival' | 'expense' | 'balance' | 'returns' | 'archive' | 'chat' | 'reports' | 'audit' | 'settings';
 
 const isIncomingUnreadMessage = (msg: gs.ChatMessage) =>
   !msg.read && !['MGR', 'Руководитель', 'Manager', 'admin'].includes(msg.fromId);
@@ -3462,6 +3462,299 @@ function NomenclaturePage({ data }: { data: ReturnType<typeof useData> }) {
   );
 }
 
+// ============ УПРАВЛЕНИЕ ПРАЙСОМ ============
+// Лист «Прайс услуг». По нему таблица сама ставит «Стоимость терапии» в листы расхода сотрудников
+// (сотрудник цену не вводит и не видит).
+const formatServicePrice = (price: number | null) =>
+  price === null ? 'не установлена' : `${price.toLocaleString('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 2 })} ₽`;
+
+const SERVICE_CATEGORY_STYLES: Record<string, string> = {
+  'Вызов': 'bg-blue-100 text-blue-700',
+  'Курс': 'bg-green-100 text-green-700',
+  'Госпитализация': 'bg-purple-100 text-purple-700',
+  'Мед. отвод': 'bg-amber-100 text-amber-700',
+  'Неустойка': 'bg-red-100 text-red-700',
+};
+
+function ServicePricesPage({ data }: { data: ReturnType<typeof useData> }) {
+  const [services, setServices] = useState<gs.ServicePrice[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
+  const [catFilter, setCatFilter] = useState('all');
+  const [editing, setEditing] = useState<gs.ServicePrice | 'new' | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      setServices(await gs.getServicePrices());
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : 'Не удалось загрузить прайс');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { void load(); }, [load]);
+
+  const categoryOrder = (category: string) => {
+    const index = (gs.SERVICE_CATEGORIES as readonly string[]).indexOf(category);
+    return index === -1 ? 99 : index;
+  };
+
+  const searchLower = search.toLowerCase().trim();
+  const filtered = services
+    .filter(s => (catFilter === 'all' || s.category === catFilter) && (!searchLower || s.name.toLowerCase().includes(searchLower)))
+    .sort((a, b) => categoryOrder(a.category) - categoryOrder(b.category) || a.name.localeCompare(b.name, 'ru', { sensitivity: 'base' }));
+
+  const withoutPrice = services.filter(s => s.active && s.price === null).length;
+
+  const isDuplicate = (candidate: gs.ServicePrice) => services.some(s =>
+    s.id !== candidate.id &&
+    s.category === candidate.category &&
+    s.name.toLowerCase() === candidate.name.toLowerCase()
+  );
+
+  const handleSave = async (item: gs.ServicePrice) => {
+    if (isDuplicate(item)) throw new Error(`Услуга «${item.name}» уже есть в категории «${item.category}»`);
+
+    if (editing === 'new') {
+      await gs.addServicePrice(item);
+      setServices(current => [...current, item]);
+      logAction(data, 'Прайс услуг', item.id, 'Создание', { newValue: `${item.category}: ${item.name} — ${formatServicePrice(item.price)}` });
+    } else if (editing) {
+      const before = editing;
+      await gs.updateServicePrice(item.id, item);
+      setServices(current => current.map(s => s.id === item.id ? item : s));
+      if (before.price !== item.price) {
+        logAction(data, 'Прайс услуг', item.id, 'Изменение', { field: `Стоимость: ${item.name}`, oldValue: formatServicePrice(before.price), newValue: formatServicePrice(item.price) });
+      }
+      if (before.name !== item.name || before.category !== item.category) {
+        logAction(data, 'Прайс услуг', item.id, 'Изменение', { field: 'Услуга', oldValue: `${before.category}: ${before.name}`, newValue: `${item.category}: ${item.name}` });
+      }
+      if (before.active !== item.active) {
+        logAction(data, 'Прайс услуг', item.id, 'Изменение', { field: `Актуальна: ${item.name}`, oldValue: before.active ? 'ДА' : 'НЕТ', newValue: item.active ? 'ДА' : 'НЕТ' });
+      }
+    }
+    setEditing(null);
+  };
+
+  const handleDelete = (item: gs.ServicePrice) => {
+    if (!confirm(
+      `Удалить услугу «${item.name}» (${item.category}) из прайса?\n\n` +
+      'В уже созданных листах расхода стоимость не изменится. ' +
+      'Если сотрудник выберет эту услугу в новом листе, стоимость будет 0 ₽.'
+    )) return;
+    const previous = services;
+    setServices(services.filter(s => s.id !== item.id));
+    logAction(data, 'Прайс услуг', item.id, 'Удаление', { newValue: `${item.category}: ${item.name}` });
+    gs.deleteServicePrice(item.id).catch((err: Error) => {
+      console.error('Ошибка удаления услуги:', err);
+      setServices(previous);
+      alert('Не удалось удалить услугу. Попробуйте ещё раз.');
+    });
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h2 className="text-2xl font-bold text-slate-800">Управление прайсом</h2>
+          <p className="text-slate-500 text-sm mt-1">
+            Стоимость услуг подставляется в листы расхода автоматически. Сотрудник цену не видит.
+          </p>
+        </div>
+        <button onClick={() => void load()} disabled={loading}
+          className="px-3 py-2 text-sm rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-50 shadow-sm">
+          🔄 Обновить
+        </button>
+      </div>
+
+      <div className="grid grid-cols-5 gap-3">
+        {gs.SERVICE_CATEGORIES.map(category => (
+          <button key={category} onClick={() => setCatFilter(catFilter === category ? 'all' : category)}
+            className={`bg-white rounded-lg p-4 border shadow-sm text-left transition-colors ${catFilter === category ? 'border-blue-500 ring-2 ring-blue-500/20' : 'border-slate-200 hover:border-slate-300'}`}>
+            <div className="text-2xl font-bold text-slate-800">{services.filter(s => s.category === category).length}</div>
+            <div className="text-xs text-slate-500 uppercase">{category}</div>
+          </button>
+        ))}
+      </div>
+
+      {withoutPrice > 0 && (
+        <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
+          ⚠️ Без цены: {withoutPrice}. Для таких услуг в лист расхода запишется 0 ₽.
+        </div>
+      )}
+
+      <div className="flex gap-3">
+        <input type="text" placeholder="Поиск услуги..." value={search} onChange={e => setSearch(e.target.value)}
+          className="flex-1 px-4 py-2 bg-white border border-slate-200 rounded-lg text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500 shadow-sm" />
+        <select value={catFilter} onChange={e => setCatFilter(e.target.value)}
+          className="px-4 py-2 bg-white border border-slate-200 rounded-lg text-slate-800 focus:outline-none focus:border-blue-500 shadow-sm">
+          <option value="all">Все категории</option>
+          {gs.SERVICE_CATEGORIES.map(category => <option key={category} value={category}>{category}</option>)}
+        </select>
+        <button onClick={() => setEditing('new')} className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg shadow-sm transition-colors">
+          + Добавить услугу
+        </button>
+      </div>
+
+      <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto shadow-sm">
+        {loading ? (
+          <div className="p-8 text-center text-slate-500">Загрузка прайса...</div>
+        ) : loadError ? (
+          <div className="p-8 text-center">
+            <p className="text-red-600 mb-1">Не удалось загрузить прайс: {loadError}</p>
+            <p className="text-sm text-slate-500 mb-4">Проверьте, что в таблице обновлён Apps Script и создан лист «Прайс услуг».</p>
+            <button onClick={() => void load()} className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg">Повторить</button>
+          </div>
+        ) : (
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-slate-200 text-left bg-slate-50">
+                <th className="px-5 py-3 text-xs font-medium text-slate-600 uppercase">Категория</th>
+                <th className="px-5 py-3 text-xs font-medium text-slate-600 uppercase">Услуга</th>
+                <th className="px-5 py-3 text-xs font-medium text-slate-600 uppercase text-right">Стоимость</th>
+                <th className="px-5 py-3 text-xs font-medium text-slate-600 uppercase">Актуальна</th>
+                <th className="px-5 py-3 text-xs font-medium text-slate-600 uppercase">Примечание</th>
+                <th className="px-5 py-3 text-xs font-medium text-slate-600 uppercase whitespace-nowrap">Действия</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map(item => (
+                <tr key={item.id} className={`border-b border-slate-100 hover:bg-slate-50 ${item.active ? '' : 'opacity-60'}`}>
+                  <td className="px-5 py-3">
+                    <span className={`px-2 py-1 rounded-full text-xs ${SERVICE_CATEGORY_STYLES[item.category] || 'bg-slate-100 text-slate-700'}`}>{item.category || '—'}</span>
+                  </td>
+                  <td className="px-5 py-3 text-sm font-medium text-slate-800">{item.name}</td>
+                  <td className={`px-5 py-3 text-sm text-right whitespace-nowrap ${item.price === null ? 'text-amber-600 italic' : 'font-semibold text-emerald-700'}`}>
+                    {formatServicePrice(item.price)}
+                  </td>
+                  <td className="px-5 py-3 text-sm">{item.active ? <span className="text-green-700">Да</span> : <span className="text-slate-500">Нет</span>}</td>
+                  <td className="px-5 py-3 text-sm text-slate-500">{item.note || '—'}</td>
+                  <td className="px-5 py-3">
+                    <div className="flex items-center gap-2">
+                      <button onClick={() => setEditing(item)} className="text-lg" title="Редактировать">✍️</button>
+                      <button onClick={() => handleDelete(item)} className="text-lg" title="Удалить">❌</button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        {!loading && !loadError && filtered.length === 0 && (
+          <div className="p-8 text-center text-slate-500">
+            {services.length === 0 ? 'Прайс пуст. Добавьте первую услугу.' : 'Ничего не найдено'}
+          </div>
+        )}
+      </div>
+
+      {editing && (
+        <ServicePriceModal
+          item={editing === 'new' ? null : editing}
+          defaultCategory={catFilter !== 'all' ? catFilter : gs.SERVICE_CATEGORIES[0]}
+          onClose={() => setEditing(null)}
+          onSave={handleSave}
+        />
+      )}
+    </div>
+  );
+}
+
+function ServicePriceModal({ item, defaultCategory, onClose, onSave }: {
+  item: gs.ServicePrice | null;
+  defaultCategory: string;
+  onClose: () => void;
+  onSave: (item: gs.ServicePrice) => Promise<void>;
+}) {
+  const [category, setCategory] = useState(item?.category || defaultCategory);
+  const [name, setName] = useState(item?.name || '');
+  const [priceText, setPriceText] = useState(item?.price === null || item?.price === undefined ? '' : String(item.price));
+  const [active, setActive] = useState(item?.active ?? true);
+  const [note, setNote] = useState(item?.note || '');
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const handleSubmit = async () => {
+    setError(null);
+    if (!name.trim()) { setError('Введите название услуги'); return; }
+    const normalized = priceText.replace(/\s/g, '').replace(',', '.');
+    const price = normalized === '' ? null : Number(normalized);
+    if (price !== null && (!Number.isFinite(price) || price < 0)) { setError('Стоимость должна быть числом не меньше 0'); return; }
+
+    setSaving(true);
+    try {
+      await onSave({
+        id: item?.id || `SRV-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        category,
+        name: name.trim(),
+        price,
+        active,
+        note: note.trim(),
+        updatedAt: new Date().toISOString(),
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось сохранить');
+      setSaving(false);
+    }
+  };
+
+  const inputClass = 'w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20';
+
+  return (
+    <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl border border-slate-200 w-full max-w-md shadow-2xl">
+        <div className="p-6 border-b border-slate-200 flex items-center justify-between">
+          <h3 className="text-lg font-bold text-slate-800">{item ? '✍️ Редактировать услугу' : '➕ Новая услуга'}</h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-2xl">×</button>
+        </div>
+        <div className="p-6 space-y-4">
+          {error && (
+            <div className="p-3 bg-red-50 border border-red-300 rounded-lg text-sm text-red-700">⚠️ {error}</div>
+          )}
+          <div>
+            <label className="text-sm text-slate-600 mb-1 block">Категория выезда *</label>
+            <select value={category} onChange={e => setCategory(e.target.value)} className={inputClass}>
+              {gs.SERVICE_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+              {!(gs.SERVICE_CATEGORIES as readonly string[]).includes(category) && <option value={category}>{category}</option>}
+            </select>
+            {category === 'Вызов' && <p className="text-xs text-slate-400 mt-1">Для «Вызов однократно» и «Вызов + повторы»</p>}
+          </div>
+          <div>
+            <label className="text-sm text-slate-600 mb-1 block">Название услуги *</label>
+            <input type="text" value={name} onChange={e => { setName(e.target.value); setError(null); }}
+              placeholder="Например: Smart Detox" className={inputClass} />
+            <p className="text-xs text-slate-400 mt-1">Должно совпадать с названием, которое выбирает сотрудник</p>
+          </div>
+          <div>
+            <label className="text-sm text-slate-600 mb-1 block">Стоимость (₽)</label>
+            <input type="text" inputMode="decimal" value={priceText}
+              onChange={e => { setPriceText(e.target.value.replace(/[^\d.,\s]/g, '')); setError(null); }}
+              placeholder="Не установлена" className={`${inputClass} text-lg font-semibold`} />
+          </div>
+          <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+            <input type="checkbox" checked={active} onChange={e => setActive(e.target.checked)} className="w-4 h-4" />
+            Актуальна (неактуальная услуга считается по 0 ₽)
+          </label>
+          <div>
+            <label className="text-sm text-slate-600 mb-1 block">Примечание</label>
+            <input type="text" value={note} onChange={e => setNote(e.target.value)} className={inputClass} />
+          </div>
+        </div>
+        <div className="p-6 border-t border-slate-200 flex justify-end gap-3">
+          <button onClick={onClose} className="px-4 py-2 rounded-lg text-slate-600 hover:bg-slate-100">Отмена</button>
+          <button onClick={() => void handleSubmit()} disabled={saving || !name.trim()}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-300 rounded-lg text-white font-medium">
+            {saving ? 'Сохранение...' : '💾 Сохранить'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ============ МОДАЛЬНОЕ ОКНО ПРОСМОТРА КАРТОЧКИ НОМЕНКЛАТУРЫ ============
 function ViewNomenclatureCardModal({
   item,
@@ -5230,6 +5523,7 @@ export default function App() {
     { id: 'dashboard', label: 'Панель руководителя', icon: '👨‍⚕️' },
     { id: 'employees', label: 'Сотрудники', icon: '👥' },
     { id: 'nomenclature', label: 'Номенклатура', icon: '💊' },
+    { id: 'prices', label: 'Управление прайсом', icon: '💰' },
     { id: 'arrival', label: 'Приход к сотруднику', icon: '📥' },
     { id: 'expense', label: 'Расход у сотрудника', icon: '📤' },
     { id: 'balance', label: 'Остаток у сотрудника', icon: '🧰' },
@@ -5246,6 +5540,7 @@ export default function App() {
       case 'dashboard': return <Dashboard data={data} onOpenSheet={openExpenseSheet} onOpenChat={openChat} onOpenReturns={() => setCurrentPage('returns')} />;
       case 'employees': return <EmployeesPage data={data} />;
       case 'nomenclature': return <NomenclaturePage data={data} />;
+      case 'prices': return <ServicePricesPage data={data} />;
       case 'arrival': return <ArrivalPage data={data} />;
       case 'expense': return <ExpensePage data={data} focusSheetId={focusSheetId} onFocusHandled={() => setFocusSheetId(null)} />;
       case 'balance': return <BalancePage data={data} />;
