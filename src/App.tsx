@@ -3543,8 +3543,8 @@ function ServicePricesPage({ data }: { data: ReturnType<typeof useData> }) {
   const handleDelete = (item: gs.ServicePrice) => {
     if (!confirm(
       `Удалить услугу «${item.name}» (${item.category}) из прайса?\n\n` +
-      'В уже созданных листах расхода стоимость не изменится. ' +
-      'Если сотрудник выберет эту услугу в новом листе, стоимость будет 0 ₽.'
+      'Услуга пропадёт из выбора в приложении сотрудника. ' +
+      'В уже созданных листах расхода стоимость не изменится.'
     )) return;
     const previous = services;
     setServices(services.filter(s => s.id !== item.id));
@@ -3562,7 +3562,7 @@ function ServicePricesPage({ data }: { data: ReturnType<typeof useData> }) {
         <div>
           <h2 className="text-2xl font-bold text-slate-800">Управление прайсом</h2>
           <p className="text-slate-500 text-sm mt-1">
-            Стоимость услуг подставляется в листы расхода автоматически. Сотрудник цену не видит.
+            Сотрудник выбирает услуги из этого прайса, стоимость подставляется в лист расхода автоматически. Сотрудник цену не видит.
           </p>
         </div>
         <button onClick={() => void load()} disabled={loading}
@@ -3680,6 +3680,7 @@ function ServicePriceModal({ item, defaultCategory, onClose, onSave }: {
   const handleSubmit = async () => {
     setError(null);
     if (!name.trim()) { setError('Введите название услуги'); return; }
+    if (name.includes(',')) { setError('Название не должно содержать запятую'); return; }
     const normalized = priceText.replace(/\s/g, '').replace(',', '.');
     const price = normalized === '' ? null : Number(normalized);
     if (price !== null && (!Number.isFinite(price) || price < 0)) { setError('Стоимость должна быть числом не меньше 0'); return; }
@@ -3726,7 +3727,6 @@ function ServicePriceModal({ item, defaultCategory, onClose, onSave }: {
             <label className="text-sm text-slate-600 mb-1 block">Название услуги *</label>
             <input type="text" value={name} onChange={e => { setName(e.target.value); setError(null); }}
               placeholder="Например: Smart Detox" className={inputClass} />
-            <p className="text-xs text-slate-400 mt-1">Должно совпадать с названием, которое выбирает сотрудник</p>
           </div>
           <div>
             <label className="text-sm text-slate-600 mb-1 block">Стоимость (₽)</label>
@@ -3736,7 +3736,7 @@ function ServicePriceModal({ item, defaultCategory, onClose, onSave }: {
           </div>
           <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
             <input type="checkbox" checked={active} onChange={e => setActive(e.target.checked)} className="w-4 h-4" />
-            Актуальна (неактуальная услуга считается по 0 ₽)
+            Актуальна (неактуальная услуга не показывается сотруднику)
           </label>
           <div>
             <label className="text-sm text-slate-600 mb-1 block">Примечание</label>
