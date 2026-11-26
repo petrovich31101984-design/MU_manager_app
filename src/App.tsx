@@ -27,6 +27,37 @@ function logAction(
   gs.addAuditLog(entry).catch(err => console.error('Не удалось записать в журнал:', err));
 }
 
+// ============ ЛИМИТ РАСХОДА ============
+// Расход по препаратам должен быть от 2,5% до 5% стоимости терапии (для всех категорий выезда).
+// Больше 5% — перерасход, меньше 2,5% — клиент недополучает услугу; оба случая — отклонение.
+// Одно правило для карточки листа, счётчика «Листов с отклонением» и уведомлений на панели.
+const LIMIT_MAX_PERCENT = 5;
+const LIMIT_MIN_PERCENT = 2.5;
+type LimitStatus = 'over' | 'under' | 'ok' | 'none';
+const roundMoney = (value: number) => Math.round(value * 100) / 100;
+function sheetLimit(sheet: { therapyCost: number; totalAmount: number }) {
+  const cost = Number(sheet.therapyCost) || 0;
+  const spent = roundMoney(Number(sheet.totalAmount) || 0);
+  if (cost <= 0) {
+    // Без стоимости терапии процент не посчитать
+    return { status: 'none' as LimitStatus, percent: 0, spent, maxAmount: 0, minAmount: 0, usage: 0 };
+  }
+  // Сравниваем после округления до сотых: иначе из-за дробных цен ровно 5% считалось бы превышением
+  const percent = roundMoney((spent * 100) / cost);
+  const maxAmount = roundMoney((cost * LIMIT_MAX_PERCENT) / 100);
+  const minAmount = roundMoney((cost * LIMIT_MIN_PERCENT) / 100);
+  const status: LimitStatus = percent > LIMIT_MAX_PERCENT ? 'over' : percent < LIMIT_MIN_PERCENT ? 'under' : 'ok';
+  /** Сколько процентов лимита (5% стоимости) израсходовано */
+  const usage = maxAmount > 0 ? (spent * 100) / maxAmount : 0;
+  return { status, percent, spent, maxAmount, minAmount, usage };
+}
+const isLimitDeviation = (sheet: { therapyCost: number; totalAmount: number }) => {
+  const { status } = sheetLimit(sheet);
+  return status === 'over' || status === 'under';
+};
+const formatPercent = (value: number) => `${value.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
+const formatRub = (value: number) => `${value.toLocaleString('ru-RU', { maximumFractionDigits: 2 })} ₽`;
+
 // Результат фоновой загрузки можно применять, только если за это время ничего не сохранялось
 const isFresh = (atStart: { pending: number; version: number }) => {
   const now = gs.getWriteState();
@@ -1691,10 +1722,7 @@ function ExpenseSheetView({
   highlighted?: boolean;
 }) {
   const emp = employees.find(e => e.id === sheet.employeeId);
-  const limit = sheet.therapyCost > 0 ? (sheet.totalAmount * 100) / sheet.therapyCost : 0;
-  const limitAmount = sheet.therapyCost * 0.05;
-  const isExceeded = limit > 5;
-  const isLow = limit < 2.5;
+  const limit = sheetLimit(sheet);
 
   const formatDateShort = (dateStr: string) => {
     const date = new Date(dateStr);
@@ -1833,8 +1861,8 @@ function ExpenseSheetView({
               <span className="text-slate-600">Стоимость терапии:</span>{' '}
               <span className="font-semibold">
                 {sheet.therapyCost.toLocaleString('ru-RU')} ₽
-                {sheet.therapyCost > 0 && (
-                  <span className="text-slate-500 ml-2">(лимит: {limitAmount.toLocaleString('ru-RU')} ₽)</span>
+                {limit.status !== 'none' && (
+                  <span className="text-slate-500 ml-2">(норма расхода: {formatRub(limit.minAmount)} – {formatRub(limit.maxAmount)})</span>
                 )}
               </span>
             </div>
@@ -1844,25 +1872,35 @@ function ExpenseSheetView({
             </div>
           </div>
 
-          {/* Использование лимита */}
-          {sheet.therapyCost > 0 && (
+          {/* Использование лимита: полоса — доля от лимита (5% стоимости терапии), отметка — нижняя граница 2,5% */}
+          {limit.status === 'none' ? (
+            <div className="mt-4 text-xs text-slate-500">ℹ️ Лимит не рассчитан: стоимость терапии 0 ₽</div>
+          ) : (
             <div className="mt-4">
-              <div className="flex justify-between items-center mb-1">
+              <div className="flex justify-between items-center mb-1 gap-3">
                 <span className="text-sm text-slate-700">Использование лимита</span>
-                <span className={`text-sm ${isExceeded ? 'text-red-600' : isLow ? 'text-slate-500' : 'text-emerald-600'}`}>
-                  {limit.toFixed(2)}%
+                <span className={`text-sm font-semibold ${limit.status === 'over' ? 'text-red-600' : limit.status === 'under' ? 'text-amber-600' : 'text-emerald-600'}`}>
+                  {formatRub(limit.spent)} из {formatRub(limit.maxAmount)} · {limit.usage.toFixed(0)}%
                 </span>
               </div>
-              <div className="w-full bg-slate-200 rounded-full h-1.5 overflow-hidden">
-                <div 
+              <div className="relative w-full bg-slate-200 rounded-full h-2 overflow-hidden">
+                <div
                   className={`h-full rounded-full transition-all ${
-                    isExceeded ? 'bg-red-500' : isLow ? 'bg-slate-400' : 'bg-emerald-500'
+                    limit.status === 'over' ? 'bg-red-500' : limit.status === 'under' ? 'bg-amber-400' : 'bg-emerald-500'
                   }`}
-                  style={{ width: `${Math.min(limit, 100)}%` }}
+                  style={{ width: `${Math.min(limit.usage, 100)}%` }}
                 ></div>
+                <div className="absolute top-0 bottom-0 w-0.5 bg-slate-500/60" style={{ left: '50%' }} title="Нижняя граница нормы — 2,5%"></div>
               </div>
-              {isExceeded && <div className="text-xs text-red-600 mt-1">⚠️ Превышение лимита 5%</div>}
-              {isLow && <div className="text-xs text-slate-500 mt-1">ℹ️ Лимит ниже 2.5%</div>}
+              <div className="text-xs text-slate-500 mt-1">
+                {formatPercent(limit.percent)} от стоимости терапии · норма {LIMIT_MIN_PERCENT.toLocaleString('ru-RU')}–{LIMIT_MAX_PERCENT}%
+              </div>
+              {limit.status === 'over' && (
+                <div className="text-xs text-red-600 mt-1">⚠️ Превышение лимита 5%: перерасход {formatRub(roundMoney(limit.spent - limit.maxAmount))}</div>
+              )}
+              {limit.status === 'under' && (
+                <div className="text-xs text-amber-700 mt-1">⚠️ Расход ниже 2,5%: клиент недополучает услугу (до нормы не хватает {formatRub(roundMoney(limit.minAmount - limit.spent))})</div>
+              )}
             </div>
           )}
         </div>
@@ -2458,11 +2496,8 @@ function ExpensePage({ data, focusSheetId, onFocusHandled }: {
   // Расчёт статистики за выбранный месяц (включая архивированные)
   const totalExpense = allSheetsForMonth.reduce((sum, s) => sum + s.totalAmount, 0);
   const sheetsCount = allSheetsForMonth.length;
-  const exceededLimit = allSheetsForMonth.filter(s => {
-    if (s.therapyCost === 0) return false;
-    const limit = (s.totalAmount * 100) / s.therapyCost;
-    return limit > 5 || limit < 2.5; // Лимит вне диапазона 2.5% - 5%
-  }).length;
+  // Расход вне нормы 2,5%–5% стоимости терапии (то же правило, что в карточке и уведомлениях)
+  const exceededLimit = allSheetsForMonth.filter(isLimitDeviation).length;
 
   // Генерация списка месяцев
   const generateMonthOptions = () => {
@@ -4092,6 +4127,12 @@ function ArrivalPage({ data }: { data: ReturnType<typeof useData> }) {
   );
 }
 
+// Категории выезда — те же, что в приложении сотрудника
+const EXPENSE_CALL_CATEGORIES = ['Вызов однократно', 'Вызов + повторы', 'Курс', 'Госпитализация', 'Мед. отвод', 'Неустойка'];
+/** Категория выезда листа → категория в «Прайсе услуг» */
+const servicePriceCategory = (callCategory: string) =>
+  callCategory === 'Вызов однократно' || callCategory === 'Вызов + повторы' ? 'Вызов' : callCategory;
+
 // ============ МОДАЛЬНОЕ ОКНО РЕДАКТИРОВАНИЯ ЛИСТА РАСХОДА ============
 function EditExpenseSheetModal({
   sheet,
@@ -4128,6 +4169,45 @@ function EditExpenseSheetModal({
   };
 
   const totalAmount = formData.items.reduce((sum, item) => sum + item.total, 0);
+
+  // Категории и услуги — те же, что выбирает сотрудник; стоимость терапии пересчитывается по «Прайсу услуг»
+  const [servicePrices, setServicePrices] = useState<gs.ServicePrice[] | null>(null);
+  const [pricesError, setPricesError] = useState(false);
+  useEffect(() => {
+    gs.getServicePrices().then(setServicePrices).catch(() => setPricesError(true));
+  }, []);
+  const categoryOptions = EXPENSE_CALL_CATEGORIES.includes(formData.callCategory) || !formData.callCategory
+    ? EXPENSE_CALL_CATEGORIES
+    : [...EXPENSE_CALL_CATEGORIES, formData.callCategory];
+  const priceCategory = servicePriceCategory(formData.callCategory);
+  const activeServices = (servicePrices || []).filter(s => s.active && s.category === priceCategory);
+  const therapyList = formData.therapyName ? formData.therapyName.split(', ') : [''];
+  const serviceOptions = [
+    ...activeServices.map(s => s.name),
+    ...therapyList.filter(n => n && !activeServices.some(s => s.name === n)),
+  ];
+  const priceByList = (category: string, names: string[]) => {
+    const services = (servicePrices || []).filter(s => s.active && s.category === servicePriceCategory(category));
+    const chosen = names.filter(Boolean);
+    const lookup = chosen.length > 0 ? chosen : [servicePriceCategory(category)];
+    let missing = false;
+    const cost = lookup.reduce((sum, name) => {
+      const service = services.find(s => s.name === name);
+      if (!service || service.price === null) { missing = true; return sum; }
+      return sum + service.price;
+    }, 0);
+    return { cost, missing };
+  };
+  // Сменили категорию или терапию — стоимость сразу пересчитывается по прайсу (её можно поправить вручную)
+  const applyTherapy = (callCategory: string, names: string[]) => {
+    const therapyName = names.join(', ');
+    if (!servicePrices) {
+      setFormData({ ...formData, callCategory, therapyName });
+      return;
+    }
+    setFormData({ ...formData, callCategory, therapyName, therapyCost: priceByList(callCategory, names).cost });
+  };
+  const byPrice = servicePrices ? priceByList(formData.callCategory, therapyList) : null;
 
   const handleAddItem = () => {
     setFormData({
@@ -4180,7 +4260,7 @@ function EditExpenseSheetModal({
       patientName: formData.patientName,
       patientBirthDate: formData.patientBirthDate,
       callCategory: formData.callCategory,
-      therapyName: formData.therapyName,
+      therapyName: therapyList.filter(Boolean).join(', '),
       therapyCost: formData.therapyCost,
       items,
       totalAmount: items.reduce((sum, item) => sum + item.total, 0)
@@ -4242,24 +4322,54 @@ function EditExpenseSheetModal({
               <label className="block text-sm font-medium text-slate-700 mb-1">Категория выезда</label>
               <select
                 value={formData.callCategory}
-                onChange={(e) => setFormData({ ...formData, callCategory: e.target.value })}
+                onChange={(e) => applyTherapy(e.target.value, [''])}
                 className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
-                <option value="Первичный">Первичный</option>
-                <option value="Повторный">Повторный</option>
-                <option value="Экстренный">Экстренный</option>
-                <option value="Плановый">Плановый</option>
-                <option value="Курс">Курс</option>
+                {!formData.callCategory && <option value="">Не выбрана</option>}
+                {categoryOptions.map(category => <option key={category} value={category}>{category}</option>)}
               </select>
             </div>
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">Название терапии</label>
-              <input
-                type="text"
-                value={formData.therapyName}
-                onChange={(e) => setFormData({ ...formData, therapyName: e.target.value })}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
+              {pricesError || !servicePrices ? (
+                <input
+                  type="text"
+                  value={formData.therapyName}
+                  onChange={(e) => setFormData({ ...formData, therapyName: e.target.value })}
+                  placeholder={pricesError ? 'Прайс не загрузился — введите вручную' : 'Загрузка прайса...'}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              ) : serviceOptions.length === 0 ? (
+                <div className="px-3 py-2 text-sm text-slate-500 border border-dashed border-slate-300 rounded-lg">В прайсе нет услуг этой категории</div>
+              ) : (
+                <div className="space-y-2">
+                  {(formData.callCategory === 'Вызов + повторы' ? therapyList : therapyList.slice(0, 1)).map((name, index) => (
+                    <div key={index} className="flex gap-2">
+                      <select
+                        value={name}
+                        onChange={(e) => {
+                          const next = [...therapyList];
+                          next[index] = e.target.value;
+                          applyTherapy(formData.callCategory, next);
+                        }}
+                        className="flex-1 min-w-0 px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      >
+                        <option value="">Выберите услугу</option>
+                        {serviceOptions.map(option => <option key={option} value={option}>{option}</option>)}
+                      </select>
+                      {formData.callCategory === 'Вызов + повторы' && therapyList.length > 1 && (
+                        <button type="button" title="Убрать"
+                          onClick={() => applyTherapy(formData.callCategory, therapyList.filter((_, i) => i !== index))}
+                          className="px-3 rounded-lg bg-red-600 hover:bg-red-700 text-white font-bold">−</button>
+                      )}
+                    </div>
+                  ))}
+                  {formData.callCategory === 'Вызов + повторы' && (
+                    <button type="button" onClick={() => applyTherapy(formData.callCategory, [...therapyList, ''])}
+                      className="text-sm px-3 py-1.5 rounded-lg bg-green-600 hover:bg-green-700 text-white">+ Повтор</button>
+                  )}
+                </div>
+              )}
             </div>
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">Стоимость терапии (₽)</label>
@@ -4269,6 +4379,16 @@ function EditExpenseSheetModal({
                 onChange={(e) => setFormData({ ...formData, therapyCost: Number(e.target.value) })}
                 className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
+              {byPrice && (
+                <p className={`text-xs mt-1 ${byPrice.missing ? 'text-amber-600' : 'text-slate-500'}`}>
+                  По прайсу: {formatRub(byPrice.cost)}
+                  {byPrice.missing && ' (не у всех выбранных услуг установлена цена)'}
+                  {byPrice.cost !== formData.therapyCost && (
+                    <button type="button" className="ml-2 text-blue-600 hover:underline"
+                      onClick={() => setFormData({ ...formData, therapyCost: byPrice.cost })}>подставить</button>
+                  )}
+                </p>
+              )}
             </div>
           </div>
 
@@ -5702,8 +5822,8 @@ function Dashboard({ data, onOpenSheet, onOpenChat, onOpenReturns }: {
   // Сотрудники оформляют возвраты со статусом «Ожидает подтверждения» (раньше считались только «Новый»)
   const pendingReturns = returns.filter(gs.isReturnPending).length;
 
-  // Уведомления о превышении лимита в листах расхода (расход > 5% стоимости терапии,
-  // то же правило, что в «Расход у сотрудника»). Архивные листы считаются обработанными.
+  // Уведомления об отклонении от лимита в листах расхода: расход больше 5% или меньше 2,5%
+  // стоимости терапии (то же правило, что в «Расход у сотрудника»). Архивные листы считаются обработанными.
   // Закрытые уведомления запоминаются в этом браузере.
   const DISMISSED_KEY = 'dismissedLimitNotifications';
   const [dismissedIds, setDismissedIds] = useState<string[]>(() => {
@@ -5714,18 +5834,19 @@ function Dashboard({ data, onOpenSheet, onOpenChat, onOpenReturns }: {
     return isNaN(d.getTime()) ? value : d.toLocaleDateString('ru-RU');
   };
   const notifications = expenseSheets
-    .filter(sheet => !sheet.archived && sheet.therapyCost > 0 && (sheet.totalAmount * 100) / sheet.therapyCost > 5)
+    .filter(sheet => !sheet.archived && isLimitDeviation(sheet))
     .filter(sheet => !dismissedIds.includes(sheet.id))
     .sort((a, b) => String(b.date).localeCompare(String(a.date)))
     .map(sheet => {
-      const percent = (sheet.totalAmount * 100) / sheet.therapyCost;
-      const limitAmount = sheet.therapyCost * 0.05;
+      const limit = sheetLimit(sheet);
       const employee = employees.find(e => normId(e.id) === normId(sheet.employeeId));
       const name = employee?.fullName || sheet.employeeName || 'Сотрудник';
       return {
         id: sheet.id,
         type: 'alert',
-        text: `⚠️ Превышение лимита: ${name} — ${percent.toFixed(2)}% (${sheet.totalAmount.toLocaleString('ru-RU')} ₽ при лимите ${limitAmount.toLocaleString('ru-RU')} ₽)`,
+        text: limit.status === 'over'
+          ? `⚠️ Превышение лимита: ${name} — ${formatPercent(limit.percent)} (${formatRub(limit.spent)} при лимите ${formatRub(limit.maxAmount)})`
+          : `⚠️ Расход ниже 2,5%: ${name} — ${formatPercent(limit.percent)} (${formatRub(limit.spent)} при норме от ${formatRub(limit.minAmount)}), клиент недополучает услугу`,
         time: `Лист расхода от ${formatDate(sheet.date)}${sheet.patientName ? ` • пациент: ${sheet.patientName}` : ''}`,
       };
     });
